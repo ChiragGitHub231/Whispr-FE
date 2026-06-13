@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Search, Hash, Shield, LogOut, CheckCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 interface Message {
   id: string;
@@ -21,6 +22,7 @@ interface ChatRoom {
 
 export const Chat: React.FC = () => {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [activeRoomId, setActiveRoomId] = useState('general');
   const [inputText, setInputText] = useState('');
   
@@ -76,8 +78,9 @@ export const Chat: React.FC = () => {
     setInputText('');
   };
 
-  const handleLogout = () => {
-    navigate('/');
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
   };
 
   const activeRoom = rooms.find(r => r.id === activeRoomId) || rooms[0];
@@ -89,9 +92,13 @@ export const Chat: React.FC = () => {
       <aside className="chat-sidebar">
         <div className="sidebar-header">
           <div className="user-profile">
-            <div className="avatar">Y</div>
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt={user.name} className="avatar-img" />
+            ) : (
+              <div className="avatar">{user?.name ? user.name[0].toUpperCase() : 'U'}</div>
+            )}
             <div className="profile-info">
-              <h4>You</h4>
+              <h4>{user?.name || 'User'}</h4>
               <span className="status-online">Online</span>
             </div>
           </div>
