@@ -3,7 +3,6 @@ import { Navbar } from './components/Navbar';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Chat } from './pages/Chat';
-import { ThemeToggle } from './components/ThemeToggle';
 import { AuthLayout } from './components/AuthLayout';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -45,7 +44,6 @@ function App() {
     <AuthProvider>
       <Router>
         <AppContent />
-        <ThemeToggle />
       </Router>
     </AuthProvider>
   );
