@@ -8,7 +8,11 @@ The frontend client for **Whispr**, a sleek, real-time messaging application. Bu
 
 - **Dynamic Landing Page:** Rich, modern landing page with animations and custom gradients.
 - **Sleek Authentication Flow:** Dedicated, polished forms for both user Login and Registration with active input verification.
-- **Backend API Integration:** Fully integrated with the backend Fastify server for account creation (`/api/auth/register`), user authentication (`/api/auth/login`), profile retrieval (`/api/auth/me`), and active session termination (`/api/auth/logout`).
+- **Unified Workspace Sidebar:** Multi-view sidebar navigator supporting dedicated tabs for **Chats**, **Profile** settings, general **Settings**, and shared **Media** gallery.
+- **Room & Group Channel Management:** Start new chats via a drop-down menu. Create Direct Message rooms or build Group Channels by resolving and verifying participant emails directly against the backend.
+- **Interactive User Profile Configuration:** In-app editing for name, contact details, bio, and custom profile image uploads/conversions, synced directly to the database.
+- **Advanced Chat Search & Match Highlighting:** Search specifically within the current chat room, complete with step-by-step match-highlighting controls (previous/next hit).
+- **Backend API Integration:** Fully integrated with the backend Fastify server for account creation (`/api/auth/register`), authentication (`/api/auth/login`), profile retrieval and update (`/api/auth/me`), database email existence verification (`/api/auth/check/:email`), and session termination (`/api/auth/logout`).
 - **Global Auth Context & Hooks:** Shared React context (`AuthProvider` and custom `useAuth()` hook) to persist state, restore sessions on reload, and dispatch API requests safely with cookies.
 - **Access Route Guards:** 
   - `ProtectedRoute` to guard `/chat` from unauthenticated users.
