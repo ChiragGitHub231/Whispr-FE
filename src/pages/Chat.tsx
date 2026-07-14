@@ -3,7 +3,6 @@ import {
   Send,
   Search,
   LogOut,
-  Check,
   CheckCheck,
   MessageSquare,
   User,
@@ -38,7 +37,7 @@ interface Message {
   timestamp: string;
   createdAt: string;
   isSelf: boolean;
-  status?: "sent" | "read";
+  status?: "sent" | "read" | "deleted";
 }
 
 interface ChatRoom {
@@ -54,6 +53,40 @@ interface ChatRoom {
   partnerContact?: string;
   partnerId?: string;
 }
+
+const playSendMessageSound = () => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    if (ctx.state === "suspended") {
+      ctx.resume();
+    }
+    const now = ctx.currentTime;
+
+    // Synthesize a WhatsApp-like outgoing message sound
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    // Outgoing sound starts at ~1000Hz and sweeps to ~2000Hz (ascending chime)
+    osc.frequency.setValueAtTime(1000, now);
+    osc.frequency.exponentialRampToValueAtTime(2000, now + 0.08);
+
+    // Envelope: sharp attack, quick decay
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.15, now + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.12);
+  } catch (error) {
+    console.error("Failed to play send message sound:", error);
+  }
+};
 
 export const Chat: React.FC = () => {
   const navigate = useNavigate();
@@ -83,7 +116,11 @@ export const Chat: React.FC = () => {
 
   // Attachment states and handlers
   const attachmentInputRef = useRef<HTMLInputElement>(null);
-  const [attachment, setAttachment] = useState<{ name: string; dataUrl: string; type: string } | null>(null);
+  const [attachment, setAttachment] = useState<{
+    name: string;
+    dataUrl: string;
+    type: string;
+  } | null>(null);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
 
@@ -126,8 +163,14 @@ export const Chat: React.FC = () => {
   };
 
   // Lightbox File Viewer State & Action
-  const [activeLightboxFile, setActiveLightboxFile] = useState<{ url: string; name: string; type: string } | null>(null);
-  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<string | null>(null);
+  const [activeLightboxFile, setActiveLightboxFile] = useState<{
+    url: string;
+    name: string;
+    type: string;
+  } | null>(null);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<string | null>(
+    null,
+  );
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
 
   const downloadImage = async (url: string, filename: string) => {
@@ -241,10 +284,9 @@ export const Chat: React.FC = () => {
 
   // App settings state
   const [appSettings, setAppSettings] = useState({
-    notifications: true,
     sound: true,
-    showStatus: true,
-    readReceipts: true,
+    showStatus: user?.show_status !== false,
+    readReceipts: user?.read_receipts !== false,
   });
 
   // Sync profileForm once user details load
@@ -263,6 +305,17 @@ export const Chat: React.FC = () => {
     }
   }, [user]);
 
+  // Sync appSettings when user data loads (including show_status and read_receipts)
+  useEffect(() => {
+    if (user) {
+      setAppSettings((prev) => ({
+        ...prev,
+        showStatus: user.show_status !== false,
+        readReceipts: user.read_receipts !== false,
+      }));
+    }
+  }, [user?.show_status, user?.read_receipts]);
+
   // Reset profileForm when switching away from the profile utility tab
   useEffect(() => {
     if (activeUtilityTab !== "profile" && user) {
@@ -280,6 +333,9 @@ export const Chat: React.FC = () => {
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, string[]>>({});
   const [presenceMap, setPresenceMap] = useState<Record<string, boolean>>({});
+  const [showStatusMap, setShowStatusMap] = useState<Record<string, boolean>>(
+    {},
+  );
 
   useEffect(() => {
     const fetchRooms = async () => {
@@ -292,16 +348,23 @@ export const Chat: React.FC = () => {
         }
         const data = await response.json();
 
-        // Populate initial presenceMap from fetched user statuses
+        // Populate initial presenceMap and showStatusMap from fetched user statuses
         const initialPresence: Record<string, boolean> = {};
+        const initialShowStatus: Record<string, boolean> = {};
         data.rooms.forEach((room: any) => {
           room.room_members?.forEach((member: any) => {
-            if (member.profiles?.user_status) {
-              initialPresence[member.profiles.id] = member.profiles.user_status.is_online;
+            // Track which users have show_status enabled
+            initialShowStatus[member.profiles.id] =
+              member.profiles?.show_status ?? true;
+            // Only add to presenceMap if user has show_status enabled
+            if (member.profiles?.user_status && member.profiles?.show_status) {
+              initialPresence[member.profiles.id] =
+                member.profiles.user_status.is_online;
             }
           });
         });
         setPresenceMap((prev) => ({ ...initialPresence, ...prev }));
+        setShowStatusMap((prev) => ({ ...initialShowStatus, ...prev }));
 
         const mappedRooms: ChatRoom[] = data.rooms.map((room: any) => {
           let displayName = room.name || "Direct Message";
@@ -327,9 +390,11 @@ export const Chat: React.FC = () => {
               ? room.description || "No description."
               : `DM conversation with ${displayName}`,
             is_group: room.is_group,
-            lastMessage: room.messages && room.messages[0]
-              ? (room.messages[0].text || (room.messages[0].file_url ? "📎 Attachment" : ""))
-              : "No messages yet.",
+            lastMessage:
+              room.messages && room.messages[0]
+                ? room.messages[0].text ||
+                  (room.messages[0].file_url ? "📎 Attachment" : "")
+                : "No messages yet.",
             members: room.room_members?.map((m: any) => m.profiles.name) || [],
             memberIds: room.room_members?.map((m: any) => m.profiles.id) || [],
             partnerEmail,
@@ -358,7 +423,9 @@ export const Chat: React.FC = () => {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMoreMap, setHasMoreMap] = useState<Record<string, boolean>>({});
-  const [shouldScrollInstantly, setShouldScrollInstantly] = useState<Record<string, boolean>>({});
+  const [shouldScrollInstantly, setShouldScrollInstantly] = useState<
+    Record<string, boolean>
+  >({});
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastMessageIdRef = useRef<Record<string, string>>({});
 
@@ -393,9 +460,13 @@ export const Chat: React.FC = () => {
 
     const connect = () => {
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-      const wsHost = isLocal ? `${window.location.hostname}:3001` : window.location.host;
-      
+      const isLocal =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+      const wsHost = isLocal
+        ? `${window.location.hostname}:3001`
+        : window.location.host;
+
       ws = new WebSocket(`${protocol}://${wsHost}/ws`);
       wsRef.current = ws;
 
@@ -403,11 +474,11 @@ export const Chat: React.FC = () => {
         ws?.send(JSON.stringify({ event: "auth", userId: user.id }));
       };
 
-      ws.onerror = (error) => {
+      ws.onerror = () => {
         // Silent error
       };
 
-      ws.onclose = (event) => {
+      ws.onclose = () => {
         // Attempt to reconnect in 3 seconds if not closed intentionally
         if (!isClosedIntentionally) {
           reconnectTimeoutId = setTimeout(() => {
@@ -499,15 +570,25 @@ export const Chat: React.FC = () => {
             }));
             break;
           }
+          case "user:status-setting:update": {
+            const { userId, showStatus } = payload.payload;
+            setShowStatusMap((prev) => ({
+              ...prev,
+              [userId]: showStatus,
+            }));
+            break;
+          }
           case "message:delete": {
             const { messageId, roomId } = payload.payload;
             setMessages((prev) => {
               const currentList = prev[roomId] || [];
-              const isLast = currentList.length > 0 && currentList[currentList.length - 1].id === messageId;
+              const isLast =
+                currentList.length > 0 &&
+                currentList[currentList.length - 1].id === messageId;
               const updatedList = currentList.map((msg) =>
                 msg.id === messageId
-                  ? { ...msg, status: "deleted", text: "", fileUrl: undefined }
-                  : msg
+                  ? { ...msg, status: "deleted" as const, text: "", fileUrl: undefined }
+                  : msg,
               );
 
               if (isLast) {
@@ -515,8 +596,8 @@ export const Chat: React.FC = () => {
                   prevRooms.map((room) =>
                     room.id === roomId
                       ? { ...room, lastMessage: "This chat has been deleted" }
-                      : room
-                  )
+                      : room,
+                  ),
                 );
               }
 
@@ -536,10 +617,13 @@ export const Chat: React.FC = () => {
               avatar: systemMessage.sender?.avatarUrl,
               text: systemMessage.text || "",
               fileUrl: systemMessage.fileUrl,
-              timestamp: new Date(systemMessage.createdAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              }),
+              timestamp: new Date(systemMessage.createdAt).toLocaleTimeString(
+                [],
+                {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                },
+              ),
               createdAt: systemMessage.createdAt,
               isSelf: false,
               status: systemMessage.status,
@@ -557,8 +641,8 @@ export const Chat: React.FC = () => {
                       ...room,
                       lastMessage: systemMessage.text,
                     }
-                  : room
-              )
+                  : room,
+              ),
             );
             break;
           }
@@ -648,7 +732,9 @@ export const Chat: React.FC = () => {
     } else {
       const fetchSilent = async () => {
         try {
-          const response = await fetch(`/api/messages/${activeRoomId}?limit=30`);
+          const response = await fetch(
+            `/api/messages/${activeRoomId}?limit=30`,
+          );
           if (response.ok) {
             const data = await response.json();
             const mapped = (data.messages || []).map((message: any) => ({
@@ -781,7 +867,10 @@ export const Chat: React.FC = () => {
     const container = messagesContainerRef.current;
     if (!container) return true;
     const threshold = 150;
-    return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+    return (
+      container.scrollHeight - container.scrollTop - container.clientHeight <=
+      threshold
+    );
   };
 
   const loadMoreMessages = async () => {
@@ -801,7 +890,9 @@ export const Chat: React.FC = () => {
       const prevScrollHeight = container ? container.scrollHeight : 0;
       const prevScrollTop = container ? container.scrollTop : 0;
 
-      const response = await fetch(`/api/messages/${roomId}?limit=30&before=${encodeURIComponent(beforeTimestamp)}`);
+      const response = await fetch(
+        `/api/messages/${roomId}?limit=30&before=${encodeURIComponent(beforeTimestamp)}`,
+      );
       if (!response.ok) {
         throw new Error("Failed to load more messages.");
       }
@@ -827,7 +918,9 @@ export const Chat: React.FC = () => {
         setMessages((prev) => {
           const currentList = prev[roomId] || [];
           const existingIds = new Set(currentList.map((m) => m.id));
-          const filteredMapped = mapped.filter((m: any) => !existingIds.has(m.id));
+          const filteredMapped = mapped.filter(
+            (m: any) => !existingIds.has(m.id),
+          );
           return {
             ...prev,
             [roomId]: [...filteredMapped, ...currentList],
@@ -837,7 +930,8 @@ export const Chat: React.FC = () => {
         requestAnimationFrame(() => {
           if (container) {
             const newScrollHeight = container.scrollHeight;
-            container.scrollTop = newScrollHeight - prevScrollHeight + prevScrollTop;
+            container.scrollTop =
+              newScrollHeight - prevScrollHeight + prevScrollTop;
           }
         });
       }
@@ -855,7 +949,12 @@ export const Chat: React.FC = () => {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const container = e.currentTarget;
-    if (container.scrollTop <= 10 && hasMoreMap[activeRoomId || ""] && !isLoadingMore && !isLoadingMessages) {
+    if (
+      container.scrollTop <= 10 &&
+      hasMoreMap[activeRoomId || ""] &&
+      !isLoadingMore &&
+      !isLoadingMessages
+    ) {
       loadMoreMessages();
     }
   };
@@ -873,7 +972,8 @@ export const Chat: React.FC = () => {
     const lastMessageId = lastMessage?.id;
 
     // Check if the last message has actually changed (i.e. a new message was appended)
-    const hasNewMessageAppended = lastMessageId && lastMessageIdRef.current[roomId] !== lastMessageId;
+    const hasNewMessageAppended =
+      lastMessageId && lastMessageIdRef.current[roomId] !== lastMessageId;
 
     // Update the ref
     if (lastMessageId) {
@@ -914,11 +1014,17 @@ export const Chat: React.FC = () => {
       // Upload to bucket only when clicking Send
       if (currentAttachment) {
         setIsUploadingAttachment(true);
-        const uploadResponse = await fetch(`/api/messages/${activeRoomId}/upload`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_data_url: currentAttachment.dataUrl, original_name: currentAttachment.name }),
-        });
+        const uploadResponse = await fetch(
+          `/api/messages/${activeRoomId}/upload`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              file_data_url: currentAttachment.dataUrl,
+              original_name: currentAttachment.name,
+            }),
+          },
+        );
 
         if (!uploadResponse.ok) {
           const data = await uploadResponse.json();
@@ -979,6 +1085,11 @@ export const Chat: React.FC = () => {
           },
         ];
       });
+
+      // Play WhatsApp-like send message sound if sound effects are enabled
+      if (appSettings.sound) {
+        playSendMessageSound();
+      }
     } catch (error: any) {
       console.error("Failed to send message:", error);
       // Restore inputs so user doesn't lose progress on error
@@ -1237,11 +1348,13 @@ export const Chat: React.FC = () => {
 
       setMessages((prev) => {
         const currentList = prev[activeRoomId!] || [];
-        const isLast = currentList.length > 0 && currentList[currentList.length - 1].id === messageId;
+        const isLast =
+          currentList.length > 0 &&
+          currentList[currentList.length - 1].id === messageId;
         const updatedList = currentList.map((msg) =>
           msg.id === messageId
-            ? { ...msg, status: "deleted", text: "", fileUrl: undefined }
-            : msg
+            ? { ...msg, status: "deleted" as const, text: "", fileUrl: undefined }
+            : msg,
         );
 
         if (isLast) {
@@ -1249,8 +1362,8 @@ export const Chat: React.FC = () => {
             prevRooms.map((room) =>
               room.id === activeRoomId
                 ? { ...room, lastMessage: "This chat has been deleted" }
-                : room
-            )
+                : room,
+            ),
           );
         }
 
@@ -1418,8 +1531,10 @@ export const Chat: React.FC = () => {
     .map((msg) => {
       const urlParts = msg.fileUrl!.split("/");
       const filename = decodeURIComponent(urlParts[urlParts.length - 1]);
-      const cleanName = filename.replace(/^[a-f0-9-]{36}_\d+_/, "").replace(/^\w+_\d+_/, "");
-      
+      const cleanName = filename
+        .replace(/^[a-f0-9-]{36}_\d+_/, "")
+        .replace(/^\w+_\d+_/, "");
+
       let fileType = "document";
       if (/\.(jpg|jpeg|png|gif|webp|svg)/i.test(msg.fileUrl!)) {
         fileType = "image";
@@ -1563,27 +1678,29 @@ export const Chat: React.FC = () => {
               >
                 {user?.name || "User"}
               </h4>
-              <span
-                style={{
-                  fontSize: "0.75rem",
-                  color: "var(--accent-green)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.25rem",
-                  fontWeight: 500,
-                }}
-              >
+              {user?.show_status !== false && (
                 <span
                   style={{
-                    width: "6px",
-                    height: "6px",
-                    backgroundColor: "var(--accent-green)",
-                    borderRadius: "50%",
-                    display: "inline-block",
+                    fontSize: "0.75rem",
+                    color: "var(--accent-green)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.25rem",
+                    fontWeight: 500,
                   }}
-                ></span>
-                Online
-              </span>
+                >
+                  <span
+                    style={{
+                      width: "6px",
+                      height: "6px",
+                      backgroundColor: "var(--accent-green)",
+                      borderRadius: "50%",
+                      display: "inline-block",
+                    }}
+                  ></span>
+                  Online
+                </span>
+              )}
             </div>
           </div>
           <button
@@ -1657,7 +1774,15 @@ export const Chat: React.FC = () => {
             </div>
           </div>
 
-          <div className="conversations-search-filter" style={{ padding: "1rem 1.25rem 0.5rem 1.25rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <div
+            className="conversations-search-filter"
+            style={{
+              padding: "1rem 1.25rem 0.5rem 1.25rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.75rem",
+            }}
+          >
             <div
               className="search-bar"
               style={{ padding: "0", borderBottom: "none" }}
@@ -1766,22 +1891,28 @@ export const Chat: React.FC = () => {
                     }}
                     title={room.name}
                   >
-                    <div className="room-avatar" style={{ position: "relative" }}>
+                    <div
+                      className="room-avatar"
+                      style={{ position: "relative" }}
+                    >
                       {room.name ? room.name[0].toUpperCase() : "?"}
-                      {!room.is_group && room.partnerId && presenceMap[room.partnerId] && (
-                        <span
-                          style={{
-                            position: "absolute",
-                            bottom: "-2px",
-                            right: "-2px",
-                            width: "9px",
-                            height: "9px",
-                            borderRadius: "50%",
-                            backgroundColor: "#22c55e",
-                            border: "2px solid var(--bg-secondary)",
-                          }}
-                        />
-                      )}
+                      {!room.is_group &&
+                        room.partnerId &&
+                        showStatusMap[room.partnerId] &&
+                        presenceMap[room.partnerId] && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              bottom: "-2px",
+                              right: "-2px",
+                              width: "9px",
+                              height: "9px",
+                              borderRadius: "50%",
+                              backgroundColor: "#22c55e",
+                              border: "2px solid var(--bg-secondary)",
+                            }}
+                          />
+                        )}
                     </div>
                     <div className="room-details">
                       <span className="room-name">
@@ -1952,7 +2083,9 @@ export const Chat: React.FC = () => {
                       transition: "opacity 0.2s",
                       marginTop: "-0.25rem",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.8")}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.opacity = "0.8")
+                    }
                     onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
                   >
                     Remove Image
@@ -2128,7 +2261,7 @@ export const Chat: React.FC = () => {
             <div className="utility-view-header">
               <h2>Account Settings</h2>
               <p>
-                Configure notifications, sound effects, security, and interface
+                Configure sound effects, privacy, and interface
                 preferences.
               </p>
             </div>
@@ -2142,7 +2275,7 @@ export const Chat: React.FC = () => {
                 marginTop: "0.5rem",
               }}
             >
-              {/* Box 1: Alerts & Notifications */}
+              {/* Box 1: Preferences & Display */}
               <div
                 className="settings-card"
                 style={{
@@ -2162,7 +2295,7 @@ export const Chat: React.FC = () => {
                     color: "var(--primary)",
                   }}
                 >
-                  Alerts & Sounds
+                  Preferences & Display
                 </h3>
 
                 <div
@@ -2174,18 +2307,15 @@ export const Chat: React.FC = () => {
                   }}
                 >
                   <div className="settings-info">
-                    <span>Push Notifications</span>
-                    <p>Receive alerts for incoming messages.</p>
+                    <span>Dark Mode Theme</span>
+                    <p>Toggle between light and dark backgrounds.</p>
                   </div>
                   <label className="switch">
                     <input
                       type="checkbox"
-                      checked={appSettings.notifications}
+                      checked={theme === "dark"}
                       onChange={(e) =>
-                        setAppSettings({
-                          ...appSettings,
-                          notifications: e.target.checked,
-                        })
+                        setTheme(e.target.checked ? "dark" : "light")
                       }
                     />
                     <span className="slider"></span>
@@ -2220,7 +2350,7 @@ export const Chat: React.FC = () => {
                 </div>
               </div>
 
-              {/* Box 2: Privacy & Receipts */}
+              {/* Box 2: Privacy & Presence */}
               <div
                 className="settings-card"
                 style={{
@@ -2259,12 +2389,41 @@ export const Chat: React.FC = () => {
                     <input
                       type="checkbox"
                       checked={appSettings.showStatus}
-                      onChange={(e) =>
+                      onChange={async (e) => {
+                        const newShowStatus = e.target.checked;
                         setAppSettings({
                           ...appSettings,
-                          showStatus: e.target.checked,
-                        })
-                      }
+                          showStatus: newShowStatus,
+                        });
+
+                        // Save to backend
+                        try {
+                          const response = await fetch("/api/auth/me", {
+                            method: "PUT",
+                            headers: {
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({
+                              name: user?.name,
+                              contact_no: user?.contact_no,
+                              show_status: newShowStatus,
+                            }),
+                          });
+
+                          if (!response.ok) {
+                            console.error("Failed to save show_status setting");
+                          } else {
+                            const data = await response.json();
+                            // Update user context with new show_status
+                            updateUser({ show_status: data.user.show_status });
+                          }
+                        } catch (error) {
+                          console.error(
+                            "Error saving show_status setting:",
+                            error,
+                          );
+                        }
+                      }}
                     />
                     <span className="slider"></span>
                   </label>
@@ -2286,60 +2445,41 @@ export const Chat: React.FC = () => {
                     <input
                       type="checkbox"
                       checked={appSettings.readReceipts}
-                      onChange={(e) =>
+                      onChange={async (e) => {
+                        const newReadReceipts = e.target.checked;
                         setAppSettings({
                           ...appSettings,
-                          readReceipts: e.target.checked,
-                        })
-                      }
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
-              </div>
+                          readReceipts: newReadReceipts,
+                        });
 
-              {/* Box 3: Theme Options */}
-              <div
-                className="settings-card"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "1.5rem",
-                  height: "100%",
-                }}
-              >
-                <h3
-                  style={{
-                    fontSize: "1.05rem",
-                    fontWeight: 700,
-                    margin: 0,
-                    paddingBottom: "0.75rem",
-                    borderBottom: "1px solid var(--border-color)",
-                    color: "var(--accent-blue)",
-                  }}
-                >
-                  Theme & Display
-                </h3>
+                        // Save to backend
+                        try {
+                          const response = await fetch("/api/auth/me", {
+                            method: "PUT",
+                            headers: {
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({
+                              name: user?.name,
+                              contact_no: user?.contact_no,
+                              read_receipts: newReadReceipts,
+                            }),
+                          });
 
-                <div
-                  className="settings-row"
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div className="settings-info">
-                    <span>Dark Mode Theme</span>
-                    <p>Toggle between light and dark backgrounds.</p>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={theme === "dark"}
-                      onChange={(e) =>
-                        setTheme(e.target.checked ? "dark" : "light")
-                      }
+                          if (!response.ok) {
+                            console.error("Failed to save read_receipts setting");
+                          } else {
+                            const data = await response.json();
+                            // Update user context with new read_receipts
+                            updateUser({ read_receipts: data.user.read_receipts });
+                          }
+                        } catch (error) {
+                          console.error(
+                            "Error saving read_receipts setting:",
+                            error,
+                          );
+                        }
+                      }}
                     />
                     <span className="slider"></span>
                   </label>
@@ -2360,21 +2500,23 @@ export const Chat: React.FC = () => {
             </div>
 
             {sharedMediaList.length === 0 ? (
-              <div style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "200px",
-                color: "var(--text-secondary)",
-                fontSize: "0.95rem",
-                gap: "0.8rem",
-                border: "1px dashed var(--border-color)",
-                borderRadius: "12px",
-                padding: "2rem",
-                textAlign: "center",
-                marginTop: "1rem"
-              }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: "200px",
+                  color: "var(--text-secondary)",
+                  fontSize: "0.95rem",
+                  gap: "0.8rem",
+                  border: "1px dashed var(--border-color)",
+                  borderRadius: "12px",
+                  padding: "2rem",
+                  textAlign: "center",
+                  marginTop: "1rem",
+                }}
+              >
                 <Image size={32} style={{ opacity: 0.6 }} />
                 <span>No shared media found in this conversation</span>
               </div>
@@ -2393,27 +2535,100 @@ export const Chat: React.FC = () => {
                   <div
                     key={item.id}
                     className="media-card"
-                    onClick={() => setActiveLightboxFile({ url: item.url, name: item.name, type: item.type })}
+                    onClick={() =>
+                      setActiveLightboxFile({
+                        url: item.url,
+                        name: item.name,
+                        type: item.type,
+                      })
+                    }
                     style={{ cursor: "pointer" }}
                   >
                     {item.type === "image" ? (
                       <img src={item.url} alt={item.name} />
                     ) : item.type === "video" ? (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0b0f19', color: 'white', position: 'relative' }}>
-                        <video src={item.url} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.4 }} />
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary)" style={{ marginLeft: '1px' }}>
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "#0b0f19",
+                          color: "white",
+                          position: "relative",
+                        }}
+                      >
+                        <video
+                          src={item.url}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            opacity: 0.4,
+                          }}
+                        />
+                        <div
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: "32px",
+                              height: "32px",
+                              borderRadius: "50%",
+                              background: "rgba(255, 255, 255, 0.9)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                            }}
+                          >
+                            <svg
+                              viewBox="0 0 24 24"
+                              width="16"
+                              height="16"
+                              fill="var(--primary)"
+                              style={{ marginLeft: "1px" }}
+                            >
                               <path d="M8 5v14l11-7z" />
                             </svg>
                           </div>
                         </div>
                       </div>
                     ) : (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', gap: '8px' }}>
-                        <FileText size={32} style={{ color: 'var(--primary)' }} />
-                        <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                          {item.url.split('.').pop()?.substring(0, 4) || 'FILE'}
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "var(--bg-tertiary)",
+                          color: "var(--text-primary)",
+                          gap: "8px",
+                        }}
+                      >
+                        <FileText
+                          size={32}
+                          style={{ color: "var(--primary)" }}
+                        />
+                        <span
+                          style={{
+                            fontSize: "0.7rem",
+                            fontWeight: 600,
+                            color: "var(--text-secondary)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          {item.url.split(".").pop()?.substring(0, 4) || "FILE"}
                         </span>
                       </div>
                     )}
@@ -2468,11 +2683,28 @@ export const Chat: React.FC = () => {
         )}
 
         {activeUtilityTab === "chats" && activeRoomId && activeRoom && (
-          <main className="chat-main" style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
+          <main
+            className="chat-main"
+            style={{
+              height: "100%",
+              width: "100%",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
             {/* Chat Header */}
             <header className="chat-header">
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                <div className="room-avatar" style={{ width: "40px", height: "40px", fontSize: "1.1rem" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.75rem",
+                }}
+              >
+                <div
+                  className="room-avatar"
+                  style={{ width: "40px", height: "40px", fontSize: "1.1rem" }}
+                >
                   {activeRoom.name ? activeRoom.name[0].toUpperCase() : "?"}
                 </div>
                 <div className="chat-title-info">
@@ -2482,31 +2714,69 @@ export const Chat: React.FC = () => {
                   </h2>
 
                   {activeRoom.is_group ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.15rem" }}>
-                      <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontWeight: 500 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        marginTop: "0.15rem",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "var(--text-secondary)",
+                          fontWeight: 500,
+                        }}
+                      >
                         {activeRoom.members?.length || 0} members
                       </span>
                     </div>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.15rem" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                  ) : activeRoom.partnerId &&
+                    showStatusMap[activeRoom.partnerId] ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        marginTop: "0.15rem",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.35rem",
+                        }}
+                      >
                         <span
                           style={{
                             width: "8px",
                             height: "8px",
                             borderRadius: "50%",
-                            backgroundColor: activeRoom.partnerId && presenceMap[activeRoom.partnerId]
-                              ? "#22c55e"
-                              : "#9ca3af",
+                            backgroundColor:
+                              activeRoom.partnerId &&
+                              presenceMap[activeRoom.partnerId]
+                                ? "#22c55e"
+                                : "#9ca3af",
                             display: "inline-block",
                           }}
                         />
-                        <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontWeight: 500 }}>
-                          {activeRoom.partnerId && presenceMap[activeRoom.partnerId] ? "Online" : "Offline"}
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--text-secondary)",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {activeRoom.partnerId &&
+                          presenceMap[activeRoom.partnerId]
+                            ? "Online"
+                            : "Offline"}
                         </span>
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
                   {typingUsers[activeRoom.id]?.length > 0 && (
                     <p
@@ -2591,7 +2861,11 @@ export const Chat: React.FC = () => {
                         className="btn-icon"
                         title="View Details"
                         onClick={() => setIsInfoDrawerOpen(!isInfoDrawerOpen)}
-                        style={{ color: isInfoDrawerOpen ? "var(--primary)" : "inherit" }}
+                        style={{
+                          color: isInfoDrawerOpen
+                            ? "var(--primary)"
+                            : "inherit",
+                        }}
                       >
                         <Info size={18} />
                       </button>
@@ -2644,7 +2918,11 @@ export const Chat: React.FC = () => {
                                 setIsInfoDrawerOpen(!isInfoDrawerOpen);
                                 setIsHeaderMenuOpen(false);
                               }}
-                              style={{ color: isInfoDrawerOpen ? "var(--primary)" : "inherit" }}
+                              style={{
+                                color: isInfoDrawerOpen
+                                  ? "var(--primary)"
+                                  : "inherit",
+                              }}
                             >
                               <Info size={16} />
                               <span>View Details</span>
@@ -2690,26 +2968,42 @@ export const Chat: React.FC = () => {
                   <div className="skeleton-avatar" />
                   <div className="skeleton-bubble-wrapper">
                     <div className="skeleton-sender" />
-                    <div className="skeleton-bubble" style={{ height: "42px", width: "80%" }} />
+                    <div
+                      className="skeleton-bubble"
+                      style={{ height: "42px", width: "80%" }}
+                    />
                   </div>
                 </div>
                 <div className="skeleton-message-row self">
                   <div className="skeleton-avatar" />
                   <div className="skeleton-bubble-wrapper">
                     <div className="skeleton-sender" />
-                    <div className="skeleton-bubble" style={{ height: "64px", width: "90%" }} />
+                    <div
+                      className="skeleton-bubble"
+                      style={{ height: "64px", width: "90%" }}
+                    />
                   </div>
                 </div>
               </div>
             ) : (
-              <div 
-                className={`messages-list ${isLoadingMessages ? 'loading-fade' : 'loaded-fade'}`}
+              <div
+                className={`messages-list ${isLoadingMessages ? "loading-fade" : "loaded-fade"}`}
                 ref={messagesContainerRef}
                 onScroll={handleScroll}
               >
                 {isLoadingMore && (
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '0.5rem 0' }}>
-                    <div className="spinner" style={{ width: '16px', height: '16px', margin: 0 }} />
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      padding: "0.5rem 0",
+                    }}
+                  >
+                    <div
+                      className="spinner"
+                      style={{ width: "16px", height: "16px", margin: 0 }}
+                    />
                   </div>
                 )}
                 {currentMessages.length === 0 ? (
@@ -2735,23 +3029,23 @@ export const Chat: React.FC = () => {
                           key={msg.id}
                           className="system-message-row"
                           style={{
-                            display: 'flex',
-                            justifyContent: 'center',
-                            width: '100%',
-                            margin: '0.75rem 0',
+                            display: "flex",
+                            justifyContent: "center",
+                            width: "100%",
+                            margin: "0.75rem 0",
                           }}
                         >
                           <span
                             className="system-message-text"
                             style={{
-                              fontSize: '0.75rem',
-                              color: 'var(--text-tertiary)',
-                              backgroundColor: 'var(--bg-tertiary)',
-                              padding: '5px 14px',
-                              borderRadius: '20px',
-                              border: '1px solid var(--border-color)',
+                              fontSize: "0.75rem",
+                              color: "var(--text-tertiary)",
+                              backgroundColor: "var(--bg-tertiary)",
+                              padding: "5px 14px",
+                              borderRadius: "20px",
+                              border: "1px solid var(--border-color)",
                               fontWeight: 600,
-                              letterSpacing: '0.01em',
+                              letterSpacing: "0.01em",
                             }}
                           >
                             {msg.text}
@@ -2764,200 +3058,354 @@ export const Chat: React.FC = () => {
                         key={msg.id}
                         className={`message-row ${msg.isSelf ? "self" : "other"}`}
                       >
-                    <div className="message-bubble-wrapper" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", position: "relative" }}>
-                      {/* For right-side chat (self), display delete button on the left (before the bubble) */}
-                      {msg.isSelf && msg.status !== "deleted" && (
-                        <button
-                          onClick={() => setDeleteConfirmTarget(msg.id)}
-                          className="msg-delete-btn"
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            color: "var(--text-tertiary)",
-                            cursor: "pointer",
-                            padding: "6px",
-                            borderRadius: "50%",
-                            transition: "all 0.2s",
-                            display: "none",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                          title="Delete message"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                      {msg.status === "deleted" ? (
                         <div
+                          className="message-bubble-wrapper"
                           style={{
-                            color: theme === "dark" ? "#9ca3af" : "#000000",
-                            fontStyle: "italic",
-                            fontSize: "0.85rem",
-                            padding: "6px 12px",
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            alignSelf: msg.isSelf ? 'flex-end' : 'flex-start',
+                            display: "flex",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: "8px",
+                            position: "relative",
                           }}
                         >
-                          <Trash2 size={13} style={{ opacity: 0.5 }} />
-                          <span>This chat has been deleted</span>
-                        </div>
-                      ) : (
-                        <div className="message-bubble">
-                          {msg.fileUrl && (
-                            <div style={{ marginBottom: msg.text ? '8px' : '0px' }}>
-                              {/\.(jpg|jpeg|png|gif|webp|svg)/i.test(msg.fileUrl) ? (
-                                <img
-                                  src={msg.fileUrl}
-                                  alt="Attachment"
-                                  onClick={() => {
-                                    const urlParts = msg.fileUrl!.split("/");
-                                    const filename = decodeURIComponent(urlParts[urlParts.length - 1]);
-                                    const cleanName = filename.replace(/^[a-f0-9-]{36}_\d+_/, "").replace(/^\w+_\d+_/, "");
-                                    setActiveLightboxFile({ url: msg.fileUrl!, name: cleanName || "Image Attachment", type: 'image' });
-                                  }}
-                                  style={{
-                                    maxWidth: '200px',
-                                    maxHeight: '150px',
-                                    borderRadius: '8px',
-                                    cursor: 'pointer',
-                                    display: 'block',
-                                    objectFit: 'cover'
-                                  }}
-                                />
-                              ) : /\.(mp4|webm|ogg|mov)/i.test(msg.fileUrl) ? (
-                                <div 
-                                  style={{ position: 'relative', cursor: 'pointer', maxWidth: '240px', maxHeight: '150px', borderRadius: '8px', overflow: 'hidden' }}
-                                  onClick={() => {
-                                    const urlParts = msg.fileUrl!.split("/");
-                                    const filename = decodeURIComponent(urlParts[urlParts.length - 1]);
-                                    const cleanName = filename.replace(/^[a-f0-9-]{36}_\d+_/, "").replace(/^\w+_\d+_/, "");
-                                    setActiveLightboxFile({ url: msg.fileUrl!, name: cleanName || "Video Attachment", type: 'video' });
-                                  }}
-                                >
-                                  <video
-                                    src={msg.fileUrl}
-                                    style={{
-                                      width: '100%',
-                                      height: '100%',
-                                      display: 'block',
-                                      objectFit: 'cover'
-                                    }}
-                                  />
-                                  {/* Play icon overlay */}
-                                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0, 0, 0, 0.25)' }}>
-                                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
-                                      <svg viewBox="0 0 24 24" width="20" height="20" fill="var(--primary)" style={{ marginLeft: '2px' }}>
-                                        <path d="M8 5v14l11-7z" />
-                                      </svg>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
+                          {/* For right-side chat (self), display delete button on the left (before the bubble) */}
+                          {msg.isSelf && msg.status !== "deleted" && (
+                            <button
+                              onClick={() => setDeleteConfirmTarget(msg.id)}
+                              className="msg-delete-btn"
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "var(--text-tertiary)",
+                                cursor: "pointer",
+                                padding: "6px",
+                                borderRadius: "50%",
+                                transition: "all 0.2s",
+                                display: "none",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                              title="Delete message"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                          {msg.status === "deleted" ? (
+                            <div
+                              style={{
+                                color: theme === "dark" ? "#9ca3af" : "#000000",
+                                fontStyle: "italic",
+                                fontSize: "0.85rem",
+                                padding: "6px 12px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                alignSelf: msg.isSelf
+                                  ? "flex-end"
+                                  : "flex-start",
+                              }}
+                            >
+                              <Trash2 size={13} style={{ opacity: 0.5 }} />
+                              <span>This chat has been deleted</span>
+                            </div>
+                          ) : (
+                            <div className="message-bubble">
+                              {msg.fileUrl && (
                                 <div
-                                  onClick={() => {
-                                    const urlParts = msg.fileUrl!.split("/");
-                                    const filename = decodeURIComponent(urlParts[urlParts.length - 1]);
-                                    const cleanName = filename.replace(/^[a-f0-9-]{36}_\d+_/, "").replace(/^\w+_\d+_/, "");
-                                    setActiveLightboxFile({ url: msg.fileUrl!, name: cleanName || "Attachment", type: 'document' });
-                                  }}
                                   style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px',
-                                    background: msg.isSelf ? 'rgba(0, 0, 0, 0.15)' : 'var(--bg-secondary)',
-                                    padding: '6px 10px',
-                                    borderRadius: '8px',
-                                    cursor: 'pointer',
-                                    border: '1px solid var(--border-color)',
-                                    maxWidth: '220px',
+                                    marginBottom: msg.text ? "8px" : "0px",
                                   }}
                                 >
-                                  <FileText size={16} style={{ flexShrink: 0 }} />
-                                  <span style={{ fontSize: '0.8rem', wordBreak: 'break-all', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {decodeURIComponent(msg.fileUrl.split('/').pop() || 'Attachment').replace(/^[a-f0-9-]{36}_\d+_/, "").replace(/^\w+_\d+_/, "")}
-                                  </span>
+                                  {/\.(jpg|jpeg|png|gif|webp|svg)/i.test(
+                                    msg.fileUrl,
+                                  ) ? (
+                                    <img
+                                      src={msg.fileUrl}
+                                      alt="Attachment"
+                                      onClick={() => {
+                                        const urlParts =
+                                          msg.fileUrl!.split("/");
+                                        const filename = decodeURIComponent(
+                                          urlParts[urlParts.length - 1],
+                                        );
+                                        const cleanName = filename
+                                          .replace(/^[a-f0-9-]{36}_\d+_/, "")
+                                          .replace(/^\w+_\d+_/, "");
+                                        setActiveLightboxFile({
+                                          url: msg.fileUrl!,
+                                          name: cleanName || "Image Attachment",
+                                          type: "image",
+                                        });
+                                      }}
+                                      style={{
+                                        maxWidth: "200px",
+                                        maxHeight: "150px",
+                                        borderRadius: "8px",
+                                        cursor: "pointer",
+                                        display: "block",
+                                        objectFit: "cover",
+                                      }}
+                                    />
+                                  ) : /\.(mp4|webm|ogg|mov)/i.test(
+                                      msg.fileUrl,
+                                    ) ? (
+                                    <div
+                                      style={{
+                                        position: "relative",
+                                        cursor: "pointer",
+                                        maxWidth: "240px",
+                                        maxHeight: "150px",
+                                        borderRadius: "8px",
+                                        overflow: "hidden",
+                                      }}
+                                      onClick={() => {
+                                        const urlParts =
+                                          msg.fileUrl!.split("/");
+                                        const filename = decodeURIComponent(
+                                          urlParts[urlParts.length - 1],
+                                        );
+                                        const cleanName = filename
+                                          .replace(/^[a-f0-9-]{36}_\d+_/, "")
+                                          .replace(/^\w+_\d+_/, "");
+                                        setActiveLightboxFile({
+                                          url: msg.fileUrl!,
+                                          name: cleanName || "Video Attachment",
+                                          type: "video",
+                                        });
+                                      }}
+                                    >
+                                      <video
+                                        src={msg.fileUrl}
+                                        style={{
+                                          width: "100%",
+                                          height: "100%",
+                                          display: "block",
+                                          objectFit: "cover",
+                                        }}
+                                      />
+                                      {/* Play icon overlay */}
+                                      <div
+                                        style={{
+                                          position: "absolute",
+                                          inset: 0,
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          background: "rgba(0, 0, 0, 0.25)",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            width: "40px",
+                                            height: "40px",
+                                            borderRadius: "50%",
+                                            background:
+                                              "rgba(255, 255, 255, 0.9)",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            boxShadow:
+                                              "0 2px 8px rgba(0,0,0,0.3)",
+                                          }}
+                                        >
+                                          <svg
+                                            viewBox="0 0 24 24"
+                                            width="20"
+                                            height="20"
+                                            fill="var(--primary)"
+                                            style={{ marginLeft: "2px" }}
+                                          >
+                                            <path d="M8 5v14l11-7z" />
+                                          </svg>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div
+                                      onClick={() => {
+                                        const urlParts =
+                                          msg.fileUrl!.split("/");
+                                        const filename = decodeURIComponent(
+                                          urlParts[urlParts.length - 1],
+                                        );
+                                        const cleanName = filename
+                                          .replace(/^[a-f0-9-]{36}_\d+_/, "")
+                                          .replace(/^\w+_\d+_/, "");
+                                        setActiveLightboxFile({
+                                          url: msg.fileUrl!,
+                                          name: cleanName || "Attachment",
+                                          type: "document",
+                                        });
+                                      }}
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "8px",
+                                        background: msg.isSelf
+                                          ? "rgba(0, 0, 0, 0.15)"
+                                          : "var(--bg-secondary)",
+                                        padding: "6px 10px",
+                                        borderRadius: "8px",
+                                        cursor: "pointer",
+                                        border: "1px solid var(--border-color)",
+                                        maxWidth: "220px",
+                                      }}
+                                    >
+                                      <FileText
+                                        size={16}
+                                        style={{ flexShrink: 0 }}
+                                      />
+                                      <span
+                                        style={{
+                                          fontSize: "0.8rem",
+                                          wordBreak: "break-all",
+                                          textDecoration: "underline",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {decodeURIComponent(
+                                          msg.fileUrl.split("/").pop() ||
+                                            "Attachment",
+                                        )
+                                          .replace(/^[a-f0-9-]{36}_\d+_/, "")
+                                          .replace(/^\w+_\d+_/, "")}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
+                              {renderMessageText(msg.id, msg.text)}
+                              <div className="message-meta">
+                                <span className="message-time">
+                                  {msg.timestamp}
+                                </span>
+                                {msg.isSelf &&
+                                  (msg.status as string) !== "deleted" && (
+                                    <CheckCheck
+                                      size={14}
+                                      className="status-icon"
+                                      style={
+                                        msg.status === "read" &&
+                                        appSettings.readReceipts
+                                          ? { color: "#22c55e" }
+                                          : undefined
+                                      }
+                                    />
+                                  )}
+                              </div>
                             </div>
                           )}
-                          {renderMessageText(msg.id, msg.text)}
-                          <div className="message-meta">
-                            <span className="message-time">{msg.timestamp}</span>
-                            {msg.isSelf && msg.status !== "deleted" && (
-                              msg.status === "read" ? (
-                                <CheckCheck
-                                  size={14}
-                                  className="status-icon"
-                                  style={{ color: "#22c55e" }}
-                                />
-                              ) : (
-                                <Check size={14} className="status-icon" />
-                              )
-                            )}
-                          </div>
+                          {/* For left-side chat (other), display delete button on the right (after the bubble) */}
+                          {!msg.isSelf && msg.status !== "deleted" && (
+                            <button
+                              onClick={() => setDeleteConfirmTarget(msg.id)}
+                              className="msg-delete-btn"
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "var(--text-tertiary)",
+                                cursor: "pointer",
+                                padding: "6px",
+                                borderRadius: "50%",
+                                transition: "all 0.2s",
+                                display: "none",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                              title="Delete message"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
-                      )}
-                      {/* For left-side chat (other), display delete button on the right (after the bubble) */}
-                      {!msg.isSelf && msg.status !== "deleted" && (
-                        <button
-                          onClick={() => setDeleteConfirmTarget(msg.id)}
-                          className="msg-delete-btn"
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            color: "var(--text-tertiary)",
-                            cursor: "pointer",
-                            padding: "6px",
-                            borderRadius: "50%",
-                            transition: "all 0.2s",
-                            display: "none",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                          title="Delete message"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );})
-              )}
-              <div ref={messagesEndRef} />
-            </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
+              </div>
             )}
 
             {/* Message Input */}
-            <form onSubmit={handleSendMessage} className="message-input-form" style={{ flexDirection: "column", gap: "0.75rem" }}>
+            <form
+              onSubmit={handleSendMessage}
+              className="message-input-form"
+              style={{ flexDirection: "column", gap: "0.75rem" }}
+            >
               {/* Attachment Preview Area */}
               {isUploadingAttachment && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', background: 'var(--bg-tertiary)', borderRadius: '8px', border: '1px solid var(--border-color)', width: 'fit-content' }}>
-                  <div className="spinner" style={{ width: '14px', height: '14px', margin: 0 }}></div>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Uploading attachment...</span>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "6px 12px",
+                    background: "var(--bg-tertiary)",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-color)",
+                    width: "fit-content",
+                  }}
+                >
+                  <div
+                    className="spinner"
+                    style={{ width: "14px", height: "14px", margin: 0 }}
+                  ></div>
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    Uploading attachment...
+                  </span>
                 </div>
               )}
               {attachmentError && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '6px 12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)', width: 'fit-content' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--accent)', marginRight: '12px' }}>{attachmentError}</span>
-                  <X size={14} style={{ cursor: 'pointer', color: 'var(--accent)' }} onClick={() => setAttachmentError(null)} />
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                    padding: "6px 12px",
+                    background: "rgba(239, 68, 68, 0.1)",
+                    borderRadius: "8px",
+                    border: "1px solid rgba(239, 68, 68, 0.2)",
+                    width: "fit-content",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "var(--accent)",
+                      marginRight: "12px",
+                    }}
+                  >
+                    {attachmentError}
+                  </span>
+                  <X
+                    size={14}
+                    style={{ cursor: "pointer", color: "var(--accent)" }}
+                    onClick={() => setAttachmentError(null)}
+                  />
                 </div>
               )}
               {attachment && (
-                <div 
-                  style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    gap: '6px', 
-                    padding: '8px', 
-                    background: 'var(--bg-tertiary)', 
-                    borderRadius: '12px', 
-                    border: '1px solid var(--border-color)', 
-                    width: 'fit-content',
-                    position: 'relative',
-                    animation: 'fadeIn 0.2s ease',
-                    marginTop: '0.25rem'
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px",
+                    padding: "8px",
+                    background: "var(--bg-tertiary)",
+                    borderRadius: "12px",
+                    border: "1px solid var(--border-color)",
+                    width: "fit-content",
+                    position: "relative",
+                    animation: "fadeIn 0.2s ease",
+                    marginTop: "0.25rem",
                   }}
                 >
                   {/* Floating Remove Button */}
@@ -2965,22 +3413,22 @@ export const Chat: React.FC = () => {
                     type="button"
                     onClick={handleRemoveAttachment}
                     style={{
-                      position: 'absolute',
-                      top: '-8px',
-                      right: '-8px',
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      background: 'rgba(239, 68, 68, 0.9)',
-                      color: 'white',
-                      border: 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      position: "absolute",
+                      top: "-8px",
+                      right: "-8px",
+                      width: "20px",
+                      height: "20px",
+                      borderRadius: "50%",
+                      background: "rgba(239, 68, 68, 0.9)",
+                      color: "white",
+                      border: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
                       zIndex: 10,
-                      transition: 'background-color 0.2s'
+                      transition: "background-color 0.2s",
                     }}
                     title="Remove attachment"
                   >
@@ -2988,57 +3436,109 @@ export const Chat: React.FC = () => {
                   </button>
 
                   {/* Visual Preview */}
-                  {attachment.type.startsWith('image/') ? (
-                    <div style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-                      <img 
-                        src={attachment.dataUrl} 
-                        alt="Preview" 
-                        style={{ 
-                          display: 'block',
-                          maxWidth: '120px', 
-                          maxHeight: '120px', 
-                          objectFit: 'contain',
-                          background: 'var(--bg-secondary)' 
-                        }} 
+                  {attachment.type.startsWith("image/") ? (
+                    <div
+                      style={{
+                        borderRadius: "8px",
+                        overflow: "hidden",
+                        border: "1px solid var(--border-color)",
+                      }}
+                    >
+                      <img
+                        src={attachment.dataUrl}
+                        alt="Preview"
+                        style={{
+                          display: "block",
+                          maxWidth: "120px",
+                          maxHeight: "120px",
+                          objectFit: "contain",
+                          background: "var(--bg-secondary)",
+                        }}
                       />
                     </div>
-                  ) : attachment.type.startsWith('video/') ? (
-                    <div style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', position: 'relative' }}>
-                      <video 
-                        src={attachment.dataUrl} 
-                        style={{ 
-                          display: 'block',
-                          maxWidth: '160px', 
-                          maxHeight: '100px', 
-                          objectFit: 'cover',
-                          background: 'var(--bg-secondary)' 
-                        }} 
+                  ) : attachment.type.startsWith("video/") ? (
+                    <div
+                      style={{
+                        borderRadius: "8px",
+                        overflow: "hidden",
+                        border: "1px solid var(--border-color)",
+                        position: "relative",
+                      }}
+                    >
+                      <video
+                        src={attachment.dataUrl}
+                        style={{
+                          display: "block",
+                          maxWidth: "160px",
+                          maxHeight: "100px",
+                          objectFit: "cover",
+                          background: "var(--bg-secondary)",
+                        }}
                       />
-                      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)', pointerEvents: 'none', color: 'white', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                      <div
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "rgba(0,0,0,0.3)",
+                          pointerEvents: "none",
+                          color: "white",
+                          fontSize: "0.75rem",
+                          fontWeight: "bold",
+                        }}
+                      >
                         VIDEO PREVIEW
                       </div>
                     </div>
                   ) : (
-                    <div 
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: '12px', 
-                        padding: '10px 14px', 
-                        background: 'var(--bg-secondary)', 
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-color)',
-                        minWidth: '200px',
-                        maxWidth: '300px'
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        padding: "10px 14px",
+                        background: "var(--bg-secondary)",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border-color)",
+                        minWidth: "200px",
+                        maxWidth: "300px",
                       }}
                     >
-                      <FileText size={24} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>
+                      <FileText
+                        size={24}
+                        style={{ color: "var(--primary)", flexShrink: 0 }}
+                      />
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "2px",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--text-primary)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            fontWeight: 500,
+                          }}
+                        >
                           {attachment.name}
                         </span>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>
-                          {attachment.type.split('/')[1]?.toUpperCase() || 'FILE'} Document
+                        <span
+                          style={{
+                            fontSize: "0.7rem",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          {attachment.type.split("/")[1]?.toUpperCase() ||
+                            "FILE"}{" "}
+                          Document
                         </span>
                       </div>
                     </div>
@@ -3047,7 +3547,14 @@ export const Chat: React.FC = () => {
               )}
 
               {/* Main Input Row */}
-              <div style={{ display: 'flex', gap: '0.75rem', width: '100%', alignItems: 'center' }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.75rem",
+                  width: "100%",
+                  alignItems: "center",
+                }}
+              >
                 <input
                   type="file"
                   ref={attachmentInputRef}
@@ -3060,18 +3567,18 @@ export const Chat: React.FC = () => {
                   onClick={() => attachmentInputRef.current?.click()}
                   disabled={isUploadingAttachment}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '42px',
-                    height: '42px',
-                    borderRadius: '8px',
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border-color)',
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "8px",
+                    background: "var(--bg-tertiary)",
+                    border: "1px solid var(--border-color)",
+                    color: "var(--text-secondary)",
+                    cursor: "pointer",
                     flexShrink: 0,
-                    transition: 'all 0.2s'
+                    transition: "all 0.2s",
                   }}
                   title="Attach file"
                 >
@@ -3084,7 +3591,20 @@ export const Chat: React.FC = () => {
                   onChange={(e) => handleTyping(e.target.value)}
                   style={{ flex: 1 }}
                 />
-                <button type="submit" className="btn btn-primary btn-send" disabled={isUploadingAttachment} style={{ height: '42px', width: '42px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-send"
+                  disabled={isUploadingAttachment}
+                  style={{
+                    height: "42px",
+                    width: "42px",
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 0,
+                  }}
+                >
                   <Send size={18} />
                 </button>
               </div>
@@ -3483,55 +4003,67 @@ export const Chat: React.FC = () => {
       {activeLightboxFile && (
         <div
           style={{
-            position: 'fixed',
+            position: "fixed",
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.85)',
-            backdropFilter: 'blur(8px)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
+            background: "rgba(0, 0, 0, 0.85)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
             zIndex: 9999,
-            animation: 'fadeIn 0.2s ease',
+            animation: "fadeIn 0.2s ease",
           }}
           onClick={() => setActiveLightboxFile(null)}
         >
           {/* Lightbox Header with filename and actions */}
           <div
             style={{
-              position: 'absolute',
+              position: "absolute",
               top: 0,
               left: 0,
               right: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '1rem 2rem',
-              background: 'linear-gradient(to bottom, rgba(0,0,0,0.5), transparent)',
-              color: 'white',
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "1rem 2rem",
+              background:
+                "linear-gradient(to bottom, rgba(0,0,0,0.5), transparent)",
+              color: "white",
               zIndex: 10000,
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <span style={{ fontSize: '1rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
+            <span
+              style={{
+                fontSize: "1rem",
+                fontWeight: 500,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: "70%",
+              }}
+            >
               {activeLightboxFile.name}
             </span>
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
               <button
-                onClick={() => downloadImage(activeLightboxFile.url, activeLightboxFile.name)}
+                onClick={() =>
+                  downloadImage(activeLightboxFile.url, activeLightboxFile.name)
+                }
                 style={{
-                  background: 'rgba(255,255,255,0.15)',
-                  border: 'none',
-                  color: 'white',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '0.85rem',
+                  background: "rgba(255,255,255,0.15)",
+                  border: "none",
+                  color: "white",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "0.85rem",
                   fontWeight: 500,
-                  transition: 'background 0.2s',
+                  transition: "background 0.2s",
                 }}
                 title="Download file"
               >
@@ -3541,14 +4073,14 @@ export const Chat: React.FC = () => {
               <button
                 onClick={() => setActiveLightboxFile(null)}
                 style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'white',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '4px',
+                  background: "transparent",
+                  border: "none",
+                  color: "white",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "4px",
                 }}
                 title="Close preview"
               >
@@ -3560,51 +4092,61 @@ export const Chat: React.FC = () => {
           {/* Lightbox File Content */}
           <div
             style={{
-              width: activeLightboxFile.type === 'document' && /\.pdf/i.test(activeLightboxFile.url) ? '80%' : 'auto',
-              height: activeLightboxFile.type === 'document' && /\.pdf/i.test(activeLightboxFile.url) ? '80%' : 'auto',
-              maxWidth: '90%',
-              maxHeight: '80%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              width:
+                activeLightboxFile.type === "document" &&
+                /\.pdf/i.test(activeLightboxFile.url)
+                  ? "80%"
+                  : "auto",
+              height:
+                activeLightboxFile.type === "document" &&
+                /\.pdf/i.test(activeLightboxFile.url)
+                  ? "80%"
+                  : "auto",
+              maxWidth: "90%",
+              maxHeight: "80%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {activeLightboxFile.type === 'image' || /\.(jpg|jpeg|png|gif|webp|svg)/i.test(activeLightboxFile.url) ? (
+            {activeLightboxFile.type === "image" ||
+            /\.(jpg|jpeg|png|gif|webp|svg)/i.test(activeLightboxFile.url) ? (
               <img
                 src={activeLightboxFile.url}
                 alt="Preview"
                 style={{
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  borderRadius: '8px',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                  objectFit: 'contain',
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                  borderRadius: "8px",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                  objectFit: "contain",
                 }}
               />
-            ) : activeLightboxFile.type === 'video' || /\.(mp4|webm|ogg|mov)/i.test(activeLightboxFile.url) ? (
+            ) : activeLightboxFile.type === "video" ||
+              /\.(mp4|webm|ogg|mov)/i.test(activeLightboxFile.url) ? (
               <video
                 src={activeLightboxFile.url}
                 controls
                 autoPlay
                 style={{
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  borderRadius: '8px',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                  background: 'black'
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                  borderRadius: "8px",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                  background: "black",
                 }}
               />
             ) : /\.pdf/i.test(activeLightboxFile.url) ? (
               <iframe
                 src={activeLightboxFile.url}
                 style={{
-                  width: '100%',
-                  height: '100%',
-                  border: 'none',
-                  borderRadius: '8px',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                  background: 'white'
+                  width: "100%",
+                  height: "100%",
+                  border: "none",
+                  borderRadius: "8px",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                  background: "white",
                 }}
                 title="PDF Document Preview"
               />
@@ -3612,14 +4154,14 @@ export const Chat: React.FC = () => {
               <iframe
                 src={activeLightboxFile.url}
                 style={{
-                  width: '600px',
-                  height: '400px',
-                  border: 'none',
-                  borderRadius: '8px',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                  background: 'var(--bg-secondary)',
-                  color: 'var(--text-primary)',
-                  padding: '16px'
+                  width: "600px",
+                  height: "400px",
+                  border: "none",
+                  borderRadius: "8px",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
+                  padding: "16px",
                 }}
                 title="Text Document Preview"
               />
@@ -3627,45 +4169,63 @@ export const Chat: React.FC = () => {
               // Fallback preview card for formats browser cannot render (like .docx, .zip)
               <div
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '12px',
-                  padding: '3rem',
-                  textAlign: 'center',
-                  maxWidth: '400px',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                  gap: '1.25rem'
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: "12px",
+                  padding: "3rem",
+                  textAlign: "center",
+                  maxWidth: "400px",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+                  gap: "1.25rem",
                 }}
               >
-                <FileText size={64} style={{ color: 'var(--primary)' }} />
+                <FileText size={64} style={{ color: "var(--primary)" }} />
                 <div>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+                  <h3
+                    style={{
+                      fontSize: "1.1rem",
+                      fontWeight: 600,
+                      color: "var(--text-primary)",
+                      marginBottom: "0.25rem",
+                    }}
+                  >
                     Preview not available
                   </h3>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    We can't preview this file type in the browser. Please download it to view the contents.
+                  <p
+                    style={{
+                      fontSize: "0.85rem",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    We can't preview this file type in the browser. Please
+                    download it to view the contents.
                   </p>
                 </div>
                 <button
-                  onClick={() => downloadImage(activeLightboxFile.url, activeLightboxFile.name)}
+                  onClick={() =>
+                    downloadImage(
+                      activeLightboxFile.url,
+                      activeLightboxFile.name,
+                    )
+                  }
                   style={{
-                    background: 'var(--primary)',
-                    border: 'none',
-                    color: 'white',
-                    padding: '10px 20px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '0.9rem',
+                    background: "var(--primary)",
+                    border: "none",
+                    color: "white",
+                    padding: "10px 20px",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    fontSize: "0.9rem",
                     fontWeight: 600,
-                    transition: 'opacity 0.2s',
-                    width: '100%'
+                    transition: "opacity 0.2s",
+                    width: "100%",
                   }}
-                  onMouseOver={(e) => e.currentTarget.style.opacity = '0.9'}
-                  onMouseOut={(e) => e.currentTarget.style.opacity = '1'}
+                  onMouseOver={(e) => (e.currentTarget.style.opacity = "0.9")}
+                  onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
                 >
                   Download File
                 </button>
@@ -3699,7 +4259,8 @@ export const Chat: React.FC = () => {
               padding: "1.5rem 2rem",
               maxWidth: "400px",
               width: "90%",
-              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)",
+              boxShadow:
+                "0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)",
               display: "flex",
               flexDirection: "column",
               gap: "1.25rem",
@@ -3722,16 +4283,38 @@ export const Chat: React.FC = () => {
               >
                 <Trash2 size={20} />
               </div>
-              <h3 style={{ fontSize: "1.15rem", fontWeight: 600, color: "var(--text-primary)", margin: 0 }}>
+              <h3
+                style={{
+                  fontSize: "1.15rem",
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  margin: 0,
+                }}
+              >
                 Delete Message
               </h3>
             </div>
 
-            <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", margin: 0, lineHeight: "1.4" }}>
-              Are you sure you want to delete this message? This action will permanently remove it from the chat for all members.
+            <p
+              style={{
+                fontSize: "0.9rem",
+                color: "var(--text-secondary)",
+                margin: 0,
+                lineHeight: "1.4",
+              }}
+            >
+              Are you sure you want to delete this message? This action will
+              permanently remove it from the chat for all members.
             </p>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "0.5rem" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "0.75rem",
+                marginTop: "0.5rem",
+              }}
+            >
               <button
                 onClick={() => setDeleteConfirmTarget(null)}
                 style={{
@@ -3745,8 +4328,12 @@ export const Chat: React.FC = () => {
                   fontWeight: 500,
                   transition: "background 0.2s",
                 }}
-                onMouseOver={(e) => e.currentTarget.style.background = "var(--bg-tertiary)"}
-                onMouseOut={(e) => e.currentTarget.style.background = "transparent"}
+                onMouseOver={(e) =>
+                  (e.currentTarget.style.background = "var(--bg-tertiary)")
+                }
+                onMouseOut={(e) =>
+                  (e.currentTarget.style.background = "transparent")
+                }
               >
                 Cancel
               </button>
@@ -3763,8 +4350,8 @@ export const Chat: React.FC = () => {
                   fontWeight: 600,
                   transition: "opacity 0.2s",
                 }}
-                onMouseOver={(e) => e.currentTarget.style.opacity = "0.9"}
-                onMouseOut={(e) => e.currentTarget.style.opacity = "1"}
+                onMouseOver={(e) => (e.currentTarget.style.opacity = "0.9")}
+                onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
               >
                 Delete
               </button>
@@ -3797,7 +4384,8 @@ export const Chat: React.FC = () => {
               padding: "1.5rem 2rem",
               maxWidth: "400px",
               width: "90%",
-              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)",
+              boxShadow:
+                "0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)",
               display: "flex",
               flexDirection: "column",
               gap: "1.25rem",
@@ -3820,16 +4408,39 @@ export const Chat: React.FC = () => {
               >
                 <Trash2 size={20} />
               </div>
-              <h3 style={{ fontSize: "1.15rem", fontWeight: 600, color: "var(--text-primary)", margin: 0 }}>
+              <h3
+                style={{
+                  fontSize: "1.15rem",
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  margin: 0,
+                }}
+              >
                 Clear Chat History
               </h3>
             </div>
 
-            <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", margin: 0, lineHeight: "1.4" }}>
-              Are you sure you want to clear all messages in <strong>#{activeRoom.name}</strong>? This action will permanently delete all chat history and attachments for all members.
+            <p
+              style={{
+                fontSize: "0.9rem",
+                color: "var(--text-secondary)",
+                margin: 0,
+                lineHeight: "1.4",
+              }}
+            >
+              Are you sure you want to clear all messages in{" "}
+              <strong>#{activeRoom.name}</strong>? This action will permanently
+              delete all chat history and attachments for all members.
             </p>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "0.5rem" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "0.75rem",
+                marginTop: "0.5rem",
+              }}
+            >
               <button
                 onClick={() => setIsClearConfirmOpen(false)}
                 style={{
@@ -3843,8 +4454,12 @@ export const Chat: React.FC = () => {
                   fontWeight: 500,
                   transition: "background 0.2s",
                 }}
-                onMouseOver={(e) => e.currentTarget.style.background = "var(--bg-tertiary)"}
-                onMouseOut={(e) => e.currentTarget.style.background = "transparent"}
+                onMouseOver={(e) =>
+                  (e.currentTarget.style.background = "var(--bg-tertiary)")
+                }
+                onMouseOut={(e) =>
+                  (e.currentTarget.style.background = "transparent")
+                }
               >
                 Cancel
               </button>
@@ -3861,8 +4476,8 @@ export const Chat: React.FC = () => {
                   fontWeight: 500,
                   transition: "opacity 0.2s",
                 }}
-                onMouseOver={(e) => e.currentTarget.style.opacity = "0.9"}
-                onMouseOut={(e) => e.currentTarget.style.opacity = "1"}
+                onMouseOver={(e) => (e.currentTarget.style.opacity = "0.9")}
+                onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
               >
                 Clear Chat
               </button>
