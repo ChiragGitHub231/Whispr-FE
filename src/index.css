@@ -868,6 +868,7 @@ body {
   gap: 0.75rem;
   flex-grow: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .channels-section h3 {
@@ -968,6 +969,7 @@ body {
   display: flex;
   flex-direction: column;
   background-color: var(--bg-primary);
+  min-height: 0;
 }
 
 .chat-header {
@@ -979,6 +981,25 @@ body {
   justify-content: space-between;
   align-items: center;
   box-sizing: border-box;
+}
+
+.chat-header .room-avatar {
+  width: 40px;
+  height: 40px;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.header-avatar-status-dot {
+  display: none;
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #22c55e;
+  border: 1.5px solid var(--bg-secondary);
 }
 
 .chat-title-info h2 {
@@ -1007,6 +1028,7 @@ body {
 
 .messages-list {
   flex-grow: 1;
+  min-height: 0;
   padding: 1.5rem;
   overflow-y: auto;
   display: flex;
@@ -1345,6 +1367,9 @@ body {
   /* Conversations List mobile styles */
   .conversations-list-panel {
     border-right: 1px solid var(--border-color) !important;
+    overflow: visible !important;
+    position: relative !important;
+    z-index: 10 !important;
   }
 
   .conversations-header {
@@ -1366,7 +1391,102 @@ body {
   }
 
   .conversations-search-filter {
+    display: flex !important;
+    padding: 0.5rem !important;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .conversations-search-filter .search-bar {
     display: none !important;
+  }
+
+  .desktop-filters {
+    display: none !important;
+  }
+
+  .mobile-filter-container {
+    display: flex !important;
+    justify-content: center;
+    width: 100%;
+    position: relative;
+  }
+
+  .mobile-filter-btn {
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .mobile-filter-btn:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+
+  .mobile-filter-btn.filter-active {
+    background-color: var(--primary);
+    border-color: var(--primary);
+    color: white;
+  }
+
+  .mobile-filter-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 0.5rem;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem;
+    min-width: 140px;
+    gap: 0.25rem;
+  }
+
+  .mobile-filter-dropdown button {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.2s ease;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .mobile-filter-dropdown button:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+
+  .mobile-filter-dropdown button.active {
+    background-color: rgba(99, 102, 241, 0.15);
+    color: var(--primary);
+    font-weight: 600;
+  }
+
+  .sidebar-status-dot {
+    display: block !important;
   }
 
   .room-details {
@@ -1388,13 +1508,52 @@ body {
   }
 
   .chat-actions-mobile {
-    display: block !important;
+    display: flex !important;
+    align-items: center;
+    gap: 0.25rem;
   }
 
   /* Chat Section mobile styles */
   .chat-header {
-    height: 65px !important;
-    padding: 0 1rem !important;
+    height: auto !important;
+    min-height: 65px !important;
+    padding: 0.75rem 1rem !important;
+  }
+
+  .chat-header .room-avatar {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 0.9rem !important;
+  }
+
+  .chat-title-info h2 {
+    font-size: 0.95rem !important;
+  }
+
+  .chat-title-info span,
+  .chat-title-info p {
+    font-size: 0.725rem !important;
+  }
+
+  .header-presence-container {
+    display: none !important;
+  }
+
+  .header-avatar-status-dot {
+    display: block !important;
+    width: 8px !important;
+    height: 8px !important;
+    bottom: -1px !important;
+    right: -1px !important;
+  }
+
+  .messages-list {
+    padding: 0.75rem !important;
+    gap: 0.75rem !important;
+  }
+
+  .message-input-form {
+    padding: 0.75rem !important;
   }
 
   /* Details Page Drawer mobile styles */
@@ -1588,6 +1747,7 @@ body {
   padding: 1.5rem 1rem;
   height: 100%;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .utility-header {
@@ -1656,6 +1816,18 @@ body {
   background-color: var(--bg-tertiary);
 }
 
+.sidebar-status-dot {
+  display: none;
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #22c55e;
+  border: 1.5px solid var(--bg-primary);
+}
+
 .utility-user-details {
   display: flex;
   flex-direction: column;
@@ -1708,6 +1880,7 @@ body {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  min-height: 0;
 }
 
 .conversations-header {
@@ -1723,6 +1896,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 100%;
+  gap: 0.5rem;
 }
 
 .conversations-title-row h3 {
@@ -1730,6 +1905,11 @@ body {
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
 }
 
 .new-chat-dropdown-container {
@@ -1776,6 +1956,7 @@ body {
 
 .filter-pills-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
   margin-top: 0.25rem;
 }
@@ -1797,6 +1978,10 @@ body {
   background-color: var(--bg-tertiary);
   color: var(--text-primary);
   border-color: var(--border-hover);
+}
+
+.mobile-filter-container {
+  display: none;
 }
 
 .filter-pill.active {

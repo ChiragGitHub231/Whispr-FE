@@ -54,6 +54,19 @@ interface ChatRoom {
   partnerId?: string;
 }
 
+interface MediaItem {
+  id: string;
+  roomId: string;
+  roomName: string;
+  senderId: string | null;
+  senderName: string;
+  senderAvatar?: string;
+  url: string;
+  name: string;
+  type: "image" | "video" | "document";
+  createdAt: string;
+}
+
 const playSendMessageSound = () => {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -88,6 +101,33 @@ const playSendMessageSound = () => {
   }
 };
 
+const groupMediaByDate = (mediaList: MediaItem[]) => {
+  const groups: Record<string, MediaItem[]> = {};
+  
+  mediaList.forEach((item) => {
+    const date = new Date(item.createdAt);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    
+    let groupTitle = "";
+    if (date.toDateString() === today.toDateString()) {
+      groupTitle = "Today";
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      groupTitle = "Yesterday";
+    } else {
+      groupTitle = date.toLocaleDateString([], { month: "long", year: "numeric" });
+    }
+    
+    if (!groups[groupTitle]) {
+      groups[groupTitle] = [];
+    }
+    groups[groupTitle].push(item);
+  });
+  
+  return groups;
+};
+
 export const Chat: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout, updateUser } = useAuth();
@@ -113,6 +153,7 @@ export const Chat: React.FC = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const typingTimeoutRef = useRef<number | null>(null);
   const activeRoomIdRef = useRef<string | null>(null);
+  const activeUtilityTabRef = useRef<string>("chats");
 
   // Attachment states and handlers
   const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -201,11 +242,18 @@ export const Chat: React.FC = () => {
     "chats" | "profile" | "settings" | "media"
   >("chats");
 
+  // Media Gallery States
+  const [allMediaList, setAllMediaList] = useState<MediaItem[]>([]);
+  const [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<"all" | "image" | "video" | "document">("all");
+  const [mediaChatFilter, setMediaChatFilter] = useState<"all" | string>("all");
+
   // Search Filters
   const [searchFilter, setSearchFilter] = useState("");
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<
     "all" | "unread" | "groups"
   >("all");
+  const [isMobileFilterMenuOpen, setIsMobileFilterMenuOpen] = useState(false);
 
   // Specific Chat Search
   const [isChatSearchActive, setIsChatSearchActive] = useState(false);
@@ -224,6 +272,10 @@ export const Chat: React.FC = () => {
   useEffect(() => {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
+
+  useEffect(() => {
+    activeUtilityTabRef.current = activeUtilityTab;
+  }, [activeUtilityTab]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -419,6 +471,28 @@ export const Chat: React.FC = () => {
     }
   }, [user]);
 
+  const fetchMediaGallery = async () => {
+    try {
+      setIsLoadingMedia(true);
+      const response = await fetch("/api/media");
+      if (!response.ok) {
+        throw new Error("Failed to load shared media gallery.");
+      }
+      const data = await response.json();
+      setAllMediaList(data.media || []);
+    } catch (err: any) {
+      console.error("Error loading media gallery:", err);
+    } finally {
+      setIsLoadingMedia(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeUtilityTab === "media") {
+      fetchMediaGallery();
+    }
+  }, [activeUtilityTab]);
+
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -528,6 +602,9 @@ export const Chat: React.FC = () => {
                 message.senderId !== user.id &&
                 message.roomId !== activeRoomIdRef.current,
             });
+            if (activeUtilityTabRef.current === "media" && message.fileUrl) {
+              fetchMediaGallery();
+            }
             break;
           }
           case "message:read": {
@@ -606,6 +683,9 @@ export const Chat: React.FC = () => {
                 [roomId]: updatedList,
               };
             });
+            if (activeUtilityTabRef.current === "media") {
+              fetchMediaGallery();
+            }
             break;
           }
           case "message:clear": {
@@ -644,6 +724,9 @@ export const Chat: React.FC = () => {
                   : room,
               ),
             );
+            if (activeUtilityTabRef.current === "media") {
+              fetchMediaGallery();
+            }
             break;
           }
           default:
@@ -1090,6 +1173,10 @@ export const Chat: React.FC = () => {
       if (appSettings.sound) {
         playSendMessageSound();
       }
+
+      if (message.fileUrl && activeUtilityTab === "media") {
+        fetchMediaGallery();
+      }
     } catch (error: any) {
       console.error("Failed to send message:", error);
       // Restore inputs so user doesn't lose progress on error
@@ -1524,31 +1611,7 @@ export const Chat: React.FC = () => {
     );
   };
 
-  // Dynamic Shared Media attachments list from the active room's messages
-  const activeRoomMessages = activeRoomId ? messages[activeRoomId] || [] : [];
-  const sharedMediaList = activeRoomMessages
-    .filter((msg) => msg.fileUrl && msg.status !== "deleted")
-    .map((msg) => {
-      const urlParts = msg.fileUrl!.split("/");
-      const filename = decodeURIComponent(urlParts[urlParts.length - 1]);
-      const cleanName = filename
-        .replace(/^[a-f0-9-]{36}_\d+_/, "")
-        .replace(/^\w+_\d+_/, "");
 
-      let fileType = "document";
-      if (/\.(jpg|jpeg|png|gif|webp|svg)/i.test(msg.fileUrl!)) {
-        fileType = "image";
-      } else if (/\.(mp4|webm|ogg|mov)/i.test(msg.fileUrl!)) {
-        fileType = "video";
-      }
-
-      return {
-        id: msg.id,
-        name: cleanName || "Attachment",
-        url: msg.fileUrl!,
-        type: fileType,
-      };
-    });
 
   return (
     <div
@@ -1619,40 +1682,43 @@ export const Chat: React.FC = () => {
               width: "100%",
             }}
           >
-            {user?.avatar_url ? (
-              <img
-                src={user.avatar_url}
-                alt={user?.name || "User"}
-                style={{
-                  width: "40px",
-                  height: "40px",
-                  borderRadius: "50%",
-                  border: "none",
-                  objectFit: "cover",
-                  flexShrink: 0,
-                }}
-              />
-            ) : (
-              <div
-                style={{
-                  width: "40px",
-                  height: "40px",
-                  borderRadius: "50%",
-                  background:
-                    "linear-gradient(135deg, var(--primary) 0%, var(--accent-purple) 100%)",
-                  color: "white",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: 700,
-                  fontSize: "1rem",
-                  border: "none",
-                  flexShrink: 0,
-                }}
-              >
-                {user?.name ? user.name[0].toUpperCase() : "U"}
-              </div>
-            )}
+            <div style={{ position: "relative", display: "inline-flex" }}>
+              {user?.avatar_url ? (
+                <img
+                  src={user.avatar_url}
+                  alt={user?.name || "User"}
+                  style={{
+                    width: "40px",
+                    height: "40px",
+                    borderRadius: "50%",
+                    border: "none",
+                    objectFit: "cover",
+                    flexShrink: 0,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "40px",
+                    height: "40px",
+                    borderRadius: "50%",
+                    background:
+                      "linear-gradient(135deg, var(--primary) 0%, var(--accent-purple) 100%)",
+                    color: "white",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 700,
+                    fontSize: "1rem",
+                    border: "none",
+                    flexShrink: 0,
+                  }}
+                >
+                  {user?.name ? user.name[0].toUpperCase() : "U"}
+                </div>
+              )}
+              <span className="sidebar-status-dot" />
+            </div>
             <div
               className="utility-user-details"
               style={{
@@ -1720,7 +1786,7 @@ export const Chat: React.FC = () => {
         <div className="conversations-list-panel">
           <div className="conversations-header">
             <div className="conversations-title-row" style={{ width: "100%" }}>
-              <h3>Conversations</h3>
+              <h3 title="Conversations">Conversations</h3>
 
               <div className="new-chat-dropdown-container">
                 <button
@@ -1801,25 +1867,88 @@ export const Chat: React.FC = () => {
               />
             </div>
 
-            <div className="filter-pills-row">
+            {/* Desktop Filter Pills */}
+            <div className="filter-pills-row desktop-filters">
               <button
                 className={`filter-pill ${activeCategoryFilter === "all" ? "active" : ""}`}
                 onClick={() => setActiveCategoryFilter("all")}
+                title="All Conversations"
               >
                 All
               </button>
               <button
                 className={`filter-pill ${activeCategoryFilter === "unread" ? "active" : ""}`}
                 onClick={() => setActiveCategoryFilter("unread")}
+                title="Unread Conversations"
               >
                 Unread
               </button>
               <button
                 className={`filter-pill ${activeCategoryFilter === "groups" ? "active" : ""}`}
                 onClick={() => setActiveCategoryFilter("groups")}
+                title="Group Conversations"
               >
                 Groups
               </button>
+            </div>
+
+            {/* Mobile Filter Menu (Three dots dropdown) */}
+            <div className="mobile-filter-container">
+              <button
+                className={`mobile-filter-btn ${activeCategoryFilter !== "all" ? "filter-active" : ""}`}
+                onClick={() => setIsMobileFilterMenuOpen(!isMobileFilterMenuOpen)}
+                title="Filter Conversations"
+              >
+                <MoreVertical size={18} />
+              </button>
+
+              {isMobileFilterMenuOpen && (
+                <>
+                  <div
+                    style={{
+                      position: "fixed",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      zIndex: 99,
+                    }}
+                    onClick={() => setIsMobileFilterMenuOpen(false)}
+                  />
+                  <div className="mobile-filter-dropdown">
+                    <button
+                      className={activeCategoryFilter === "all" ? "active" : ""}
+                      onClick={() => {
+                        setActiveCategoryFilter("all");
+                        setIsMobileFilterMenuOpen(false);
+                      }}
+                    >
+                      <MessageSquare size={16} />
+                      <span>All</span>
+                    </button>
+                    <button
+                      className={activeCategoryFilter === "unread" ? "active" : ""}
+                      onClick={() => {
+                        setActiveCategoryFilter("unread");
+                        setIsMobileFilterMenuOpen(false);
+                      }}
+                    >
+                      <Mail size={16} />
+                      <span>Unread</span>
+                    </button>
+                    <button
+                      className={activeCategoryFilter === "groups" ? "active" : ""}
+                      onClick={() => {
+                        setActiveCategoryFilter("groups");
+                        setIsMobileFilterMenuOpen(false);
+                      }}
+                    >
+                      <Users size={16} />
+                      <span>Groups</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -2489,156 +2618,283 @@ export const Chat: React.FC = () => {
           </div>
         )}
 
-        {activeUtilityTab === "media" && (
-          <div className="utility-view-container" style={{ maxWidth: "100%" }}>
-            <div className="utility-view-header">
-              <h2>Shared Media</h2>
-              <p>
-                Browse photos, files, and blueprints uploaded across your
-                channels.
-              </p>
-            </div>
+        {activeUtilityTab === "media" && (() => {
+          const filteredMedia = allMediaList.filter((item) => {
+            const matchesType = mediaTypeFilter === "all" || item.type === mediaTypeFilter;
+            const matchesChat = mediaChatFilter === "all" || item.roomId === mediaChatFilter;
+            return matchesType && matchesChat;
+          });
 
-            {sharedMediaList.length === 0 ? (
+          const groupedMedia = groupMediaByDate(filteredMedia);
+
+          return (
+            <div className="utility-view-container" style={{ maxWidth: "100%", gap: "1rem" }}>
+              <div className="utility-view-header" style={{ marginBottom: "0.25rem" }}>
+                <h2>Shared Media</h2>
+                <p>
+                  Browse photos, files, and blueprints uploaded across your
+                  channels.
+                </p>
+              </div>
+
+              {/* Filters Block */}
               <div
                 style={{
                   display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  height: "200px",
-                  color: "var(--text-secondary)",
-                  fontSize: "0.95rem",
-                  gap: "0.8rem",
-                  border: "1px dashed var(--border-color)",
-                  borderRadius: "12px",
-                  padding: "2rem",
-                  textAlign: "center",
-                  marginTop: "1rem",
-                }}
-              >
-                <Image size={32} style={{ opacity: 0.6 }} />
-                <span>No shared media found in this conversation</span>
-              </div>
-            ) : (
-              <div
-                className="media-grid"
-                style={{
-                  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
                   gap: "1.5rem",
+                  flexWrap: "wrap",
                   width: "100%",
-                  margin: 0,
-                  marginTop: "0.5rem",
+                  padding: "0",
+                  marginBottom: "0.25rem",
                 }}
               >
-                {sharedMediaList.map((item) => (
-                  <div
-                    key={item.id}
-                    className="media-card"
-                    onClick={() =>
-                      setActiveLightboxFile({
-                        url: item.url,
-                        name: item.name,
-                        type: item.type,
-                      })
-                    }
-                    style={{ cursor: "pointer" }}
-                  >
-                    {item.type === "image" ? (
-                      <img src={item.url} alt={item.name} />
-                    ) : item.type === "video" ? (
-                      <div
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          background: "#0b0f19",
-                          color: "white",
-                          position: "relative",
-                        }}
-                      >
-                        <video
-                          src={item.url}
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                            opacity: 0.4,
-                          }}
-                        />
-                        <div
-                          style={{
-                            position: "absolute",
-                            inset: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: "32px",
-                              height: "32px",
-                              borderRadius: "50%",
-                              background: "rgba(255, 255, 255, 0.9)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-                            }}
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              width="16"
-                              height="16"
-                              fill="var(--primary)"
-                              style={{ marginLeft: "1px" }}
-                            >
-                              <path d="M8 5v14l11-7z" />
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          background: "var(--bg-tertiary)",
-                          color: "var(--text-primary)",
-                          gap: "8px",
-                        }}
-                      >
-                        <FileText
-                          size={32}
-                          style={{ color: "var(--primary)" }}
-                        />
-                        <span
-                          style={{
-                            fontSize: "0.7rem",
-                            fontWeight: 600,
-                            color: "var(--text-secondary)",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          {item.url.split(".").pop()?.substring(0, 4) || "FILE"}
-                        </span>
-                      </div>
-                    )}
-                    <div className="media-card-overlay">{item.name}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", flex: 1, minWidth: "200px" }}>
+                  <label style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Filter by Chat
+                  </label>
+                  <div style={{ position: "relative", width: "100%" }}>
+                    <select
+                      value={mediaChatFilter}
+                      onChange={(e) => setMediaChatFilter(e.target.value)}
+                      style={{
+                        background: "var(--bg-tertiary)",
+                        color: "var(--text-primary)",
+                        border: "1px solid var(--border-color)",
+                        borderRadius: "20px",
+                        padding: "0.5rem 2.5rem 0.5rem 1.25rem",
+                        fontSize: "0.825rem",
+                        outline: "none",
+                        cursor: "pointer",
+                        width: "100%",
+                        transition: "all 0.2s",
+                        WebkitAppearance: "none",
+                        MozAppearance: "none",
+                        appearance: "none",
+                      }}
+                    >
+                      <option value="all">All Conversations</option>
+                      {rooms.map((room) => (
+                        <option key={room.id} value={room.id}>
+                          {room.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={16}
+                      style={{
+                        position: "absolute",
+                        right: "1.25rem",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        color: "var(--text-secondary)",
+                        pointerEvents: "none",
+                      }}
+                    />
                   </div>
-                ))}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", flex: 1, minWidth: "220px" }}>
+                  <label style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Filter by Type
+                  </label>
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                    {(["all", "image", "video", "document"] as const).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => setMediaTypeFilter(type)}
+                        style={{
+                          background: mediaTypeFilter === type ? "var(--primary)" : "var(--bg-tertiary)",
+                          color: mediaTypeFilter === type ? "white" : "var(--text-secondary)",
+                          border: "1px solid var(--border-color)",
+                          borderRadius: "20px",
+                          padding: "0.5rem 1.25rem",
+                          fontSize: "0.825rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          transition: "all 0.2s ease",
+                          textTransform: "capitalize",
+                        }}
+                      >
+                        {type === "all" ? "All Media" : type + "s"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
-        )}
+
+              {isLoadingMedia ? (
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "200px" }}>
+                  <div className="spinner" style={{ width: "32px", height: "32px" }}></div>
+                </div>
+              ) : filteredMedia.length === 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    height: "200px",
+                    color: "var(--text-secondary)",
+                    fontSize: "0.95rem",
+                    gap: "0.8rem",
+                    border: "1px dashed var(--border-color)",
+                    borderRadius: "12px",
+                    padding: "2rem",
+                    textAlign: "center",
+                    marginTop: "1rem",
+                  }}
+                >
+                  <Image size={32} style={{ opacity: 0.6 }} />
+                  <span>No shared media found matching constraints</span>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "2.5rem", marginTop: "0.5rem" }}>
+                  {Object.entries(groupedMedia).map(([groupTitle, items]) => (
+                    <div key={groupTitle} style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                      <h3
+                        style={{
+                          fontSize: "0.95rem",
+                          fontWeight: 800,
+                          color: "var(--text-primary)",
+                          borderBottom: "1px solid var(--border-color)",
+                          paddingBottom: "0.6rem",
+                          marginTop: "0.5rem",
+                          letterSpacing: "0.02em",
+                        }}
+                      >
+                        {groupTitle}
+                      </h3>
+                      <div
+                        className="media-grid"
+                        style={{
+                          gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
+                          gap: "1.25rem",
+                          width: "100%",
+                          margin: 0,
+                        }}
+                      >
+                        {items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="media-card"
+                            onClick={() =>
+                              setActiveLightboxFile({
+                                url: item.url,
+                                name: item.name,
+                                type: item.type,
+                              })
+                            }
+                            style={{ cursor: "pointer" }}
+                          >
+                            {item.type === "image" ? (
+                              <img src={item.url} alt={item.name} />
+                            ) : item.type === "video" ? (
+                              <div
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  background: "#0b0f19",
+                                  color: "white",
+                                  position: "relative",
+                                }}
+                              >
+                                <video
+                                  src={item.url}
+                                  style={{
+                                    width: "100%",
+                                    height: "100%",
+                                    objectFit: "cover",
+                                    opacity: 0.4,
+                                  }}
+                                />
+                                <div
+                                  style={{
+                                    position: "absolute",
+                                    inset: 0,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: "32px",
+                                      height: "32px",
+                                      borderRadius: "50%",
+                                      background: "rgba(255, 255, 255, 0.9)",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                                    }}
+                                  >
+                                    <svg
+                                      viewBox="0 0 24 24"
+                                      width="16"
+                                      height="16"
+                                      fill="var(--primary)"
+                                      style={{ marginLeft: "1px" }}
+                                    >
+                                      <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  background: "var(--bg-tertiary)",
+                                  color: "var(--text-primary)",
+                                  gap: "8px",
+                                }}
+                              >
+                                <FileText
+                                  size={32}
+                                  style={{ color: "var(--primary)" }}
+                                />
+                                <span
+                                  style={{
+                                    fontSize: "0.7rem",
+                                    fontWeight: 600,
+                                    color: "var(--text-secondary)",
+                                    textTransform: "uppercase",
+                                  }}
+                                >
+                                  {item.url.split(".").pop()?.substring(0, 4) || "FILE"}
+                                </span>
+                              </div>
+                            )}
+                            <div className="media-card-overlay" style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+                              <div style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                                {item.name}
+                              </div>
+                              <div style={{ fontSize: "0.6rem", opacity: 0.8, marginTop: "2px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                                in {item.roomName}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {activeUtilityTab === "chats" && !activeRoomId && (
           <div className="welcome-panel">
@@ -2703,9 +2959,15 @@ export const Chat: React.FC = () => {
               >
                 <div
                   className="room-avatar"
-                  style={{ width: "40px", height: "40px", fontSize: "1.1rem" }}
+                  style={{ position: "relative" }}
                 >
                   {activeRoom.name ? activeRoom.name[0].toUpperCase() : "?"}
+                  {!activeRoom.is_group &&
+                    activeRoom.partnerId &&
+                    showStatusMap[activeRoom.partnerId] &&
+                    presenceMap[activeRoom.partnerId] && (
+                      <span className="header-avatar-status-dot" />
+                    )}
                 </div>
                 <div className="chat-title-info">
                   <h2>
@@ -2735,6 +2997,7 @@ export const Chat: React.FC = () => {
                   ) : activeRoom.partnerId &&
                     showStatusMap[activeRoom.partnerId] ? (
                     <div
+                      className="header-presence-container"
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -2878,6 +3141,14 @@ export const Chat: React.FC = () => {
                       >
                         <Trash2 size={18} />
                       </button>
+
+                      <button
+                        className="btn-icon"
+                        title="Close Chat"
+                        onClick={() => setActiveRoomId(null)}
+                      >
+                        <X size={18} />
+                      </button>
                     </div>
 
                     {/* Mobile Toolbar (Three-dots dropdown menu) */}
@@ -2904,6 +3175,15 @@ export const Chat: React.FC = () => {
                             onClick={() => setIsHeaderMenuOpen(false)}
                           />
                           <div className="header-menu-dropdown">
+                            <button
+                              onClick={() => {
+                                setActiveRoomId(null);
+                                setIsHeaderMenuOpen(false);
+                              }}
+                            >
+                              <X size={16} />
+                              <span>Close Chat</span>
+                            </button>
                             <button
                               onClick={() => {
                                 setIsChatSearchActive(true);

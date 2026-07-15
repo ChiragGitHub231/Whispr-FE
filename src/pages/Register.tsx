@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, Mail, Lock, UserPlus, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { User, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { z } from 'zod';
 import { useAuth } from '../context/AuthContext';
 
@@ -90,7 +90,7 @@ export const Register: React.FC = () => {
             <input
               type="text"
               id="username"
-              placeholder="johndoe"
+              placeholder="Enter username"
               value={username}
               disabled={isSubmitting}
               onChange={(e) => {
@@ -111,7 +111,7 @@ export const Register: React.FC = () => {
             <input
               type="email"
               id="email"
-              placeholder="you@example.com"
+              placeholder="Enter email"
               value={email}
               disabled={isSubmitting}
               onChange={(e) => {
@@ -132,7 +132,7 @@ export const Register: React.FC = () => {
             <input
               type={showPassword ? 'text' : 'password'}
               id="password"
-              placeholder="••••••••"
+              placeholder="Enter password"
               value={password}
               disabled={isSubmitting}
               onChange={(e) => {
@@ -162,7 +162,7 @@ export const Register: React.FC = () => {
             <input
               type={showConfirmPassword ? 'text' : 'password'}
               id="confirmPassword"
-              placeholder="••••••••"
+              placeholder="Enter confirm password"
               value={confirmPassword}
               disabled={isSubmitting}
               onChange={(e) => {
@@ -187,14 +187,13 @@ export const Register: React.FC = () => {
 
         <button type="submit" className="btn btn-primary btn-full" disabled={isSubmitting}>
           <span>{isSubmitting ? 'Creating Account...' : 'Sign Up'}</span>
-          {!isSubmitting && <UserPlus size={18} />}
         </button>
       </form>
 
       <div className="auth-footer">
         <span>Already have an account? </span>
         <Link to="/login" className="auth-link">
-          Log in <ArrowRight size={14} />
+          Log in
         </Link>
       </div>
     </div>
