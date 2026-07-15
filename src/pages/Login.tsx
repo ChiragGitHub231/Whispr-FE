@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Mail, Lock, LogIn, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { z } from 'zod';
 import { useAuth } from '../context/AuthContext';
 
@@ -94,7 +94,7 @@ export const Login: React.FC = () => {
             <input
               type="email"
               id="email"
-              placeholder="you@example.com"
+              placeholder="Enter email"
               value={email}
               disabled={isSubmitting}
               onChange={(e) => {
@@ -115,7 +115,7 @@ export const Login: React.FC = () => {
             <input
               type={showPassword ? 'text' : 'password'}
               id="password"
-              placeholder="••••••••"
+              placeholder="Enter password"
               value={password}
               disabled={isSubmitting}
               onChange={(e) => {
@@ -140,14 +140,13 @@ export const Login: React.FC = () => {
 
         <button type="submit" className="btn btn-primary btn-full" disabled={isSubmitting}>
           <span>{isSubmitting ? 'Signing In...' : 'Sign In'}</span>
-          {!isSubmitting && <LogIn size={18} />}
         </button>
       </form>
 
       <div className="auth-footer">
         <span>Don't have an account? </span>
         <Link to="/register" className="auth-link">
-          Create one <ArrowRight size={14} />
+          Create one
         </Link>
       </div>
     </div>

@@ -27,6 +27,7 @@ The frontend client for **Whispr**, a sleek, real-time messaging application. Bu
 - **Immersive Chat Interface:** Fully featured chat interface showing the active user's details, dynamic initials/avatar, online indicators, and realtime chat updates.
 - **Premium Custom Aesthetics:** Custom dark/glassmorphic theme variables, scrollbars, card layouts, hover transitions, error alerts, page spinners, and responsive layouts.
 - **Vector Icons:** Fully integrated vector icons using `lucide-react`.
+- **Shared Media Gallery Utility:** Search and browse photos, videos, and blueprints/files shared across all user conversations. Features date-grouped buckets ("Today", "Yesterday", and Month-Year headings), filters for file types (images, videos, documents), and room-specific filtering. Updates in real-time on messaging events.
 
 ---
 
@@ -89,8 +90,12 @@ npm run preview
 
 The layout has been heavily optimized for small screen dimensions and touch interactions under a dedicated `@media (max-width: 768px)` system:
 - **Utility Nav Bar Collapse:** Collapses to a slim `70px` left bar on small screens, centering navigation icons and branding logo with full hover tooltips.
-- **Compact Conversations List:** Shrinks the middle panel to `80px` displaying centered room avatars. Hovering over room avatars dynamically exposes the room/contact name in tooltips.
-- **Aligned Headers:** Standardized height (`65px`) and horizontal padding (`1rem`) across all main layout headers (Conversations list, Chat conversation, and Details panel) for a perfectly aligned vertical axis.
+- **Compact Conversations List & Dropdown Filters:** Shrinks the middle panel to `80px` displaying centered room avatars. Replaces the horizontal category pills (All, Unread, Groups) with a single three-dots icon button that toggles an absolute-positioned dropdown popup menu, protecting panel space.
+- **Aligned & Flexible Headers:** Standardized height (`65px`) across main headers, updated to grow flexibly (`height: auto !important`) with vertical padding (`0.75rem 1rem !important`) when zoomed in to prevent label cutoff.
+- **Header DM Presence & Avatar Status Dot:** Hides the online/offline text below the room name in direct messages on small viewports to save vertical space. If the partner is online, displays a green status dot directly on the header room avatar.
+- **User Sidebar Active Indicator:** Renders a green online status dot at the bottom right of the user's avatar card in the leftmost sidebar navigator footer.
+- **Tighter Vertical Spacing:** Decreases margins and padding for the messages log and message input typing area, maximizing the scrollable conversation feed area.
+- **Scroll Containment constraints (`min-height: 0`):** Enforces `min-height: 0` on flex panels and grid cells, prompting the browser to activate column scrollbars rather than pushing bottom layouts (like typing forms) off-screen when zoomed.
 - **Details Drawer Overlay:** Renders as a smooth-sliding fixed drawer spanning `280px` to cover a major portion of the screen, ensuring absolute visibility of details and the close (`X`) button without clipping.
 - **Avatar Stretching Protections:** Implemented aspect ratio preservation and `flex-shrink: 0` constraints to secure proper circular representation of initials/profile avatars on limited view heights.
 - **Header Text Protection:** Added bounds and auto-truncation rules for long room/contact names and online status texts in the header.
