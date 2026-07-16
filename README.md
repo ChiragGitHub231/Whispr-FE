@@ -1,33 +1,42 @@
-# Whispr - Frontend Client
+# Whispr - A chat based web application
 
-The frontend client for **Whispr**, a sleek, real-time messaging application. Built with [React 19](https://react.dev/), [TypeScript](https://www.typescriptlang.org/), and [Vite](https://vite.dev/), featuring custom vanilla CSS stylesheets optimized for high performance, smooth micro-animations, and modern visual design.
+**Whispr** is a high-performance, real-time chat application designed with a sleek, premium dark/glassmorphic user interface. It provides a highly secure and interactive messaging platform for instant communication.
+
+*   **Purpose & Use Case:** Enables users to chat instantly via private Direct Messages (DMs) and multi-user Group Channels, serving as a comprehensive real-time communication platform.
+*   **Real-Time Interactions:** Supports instantaneous message delivery, live typing status, online/offline presence tracking, and synchronized read receipts using WebSockets.
+*   **Media & File Sharing:** Allows users to share and preview images, audio, video, and documents (up to 50MB) with an in-app media gallery to view all shared files.
+*   **Privacy & Account Controls:** Features secure JWT authentication (with cookies), customizable user profiles (including cropping avatars), and privacy controls to toggle status visibility, soft-delete messages, or clear chat history.
 
 ---
 
-## ✨ Features
+## 📸 Project Screenshots
 
-- **Dynamic Landing Page:** Rich, modern landing page with animations and custom gradients.
-- **Sleek Authentication Flow:** Dedicated, polished forms for both user Login and Registration with active input verification.
-- **Unified Workspace Sidebar:** Multi-view sidebar navigator supporting dedicated tabs for **Chats**, **Profile** settings, general **Settings**, and shared **Media** gallery.
-- **Room & Group Channel Management:** Start new chats via a drop-down menu. Create Direct Message rooms or build Group Channels by resolving and verifying participant emails directly against the backend.
-- **Realtime Messaging & State Syncing:** Live message updates through WebSocket events for chat delivery, read receipts, and state syncing.
-- **Presence & Activity Indicators:** Real-time online/offline presence indicators (including a "Last seen" timestamp for offline members) and live typing indicators showing which member is typing in the room. Respects users' "Show Status" privacy setting.
-- **Unread Conversation Tracking:** Chat list badges update in real-time for unread messages without needing to reopen the conversation manually.
-- **Infinite Message Pagination:** Cursor-based older message pagination that automatically loads previous chat pages (30 messages per page) on scroll-up. Uses a custom skeleton loader UI (`skeleton-pulse` animation) and scroll-anchoring to prevent visual layout jumps.
-- **Media & File Attachments:** Share files up to 50MB. Features an input preview drawer before sending, and custom visual rendering blocks in the chat feed (image overlays, full video players, audio player cards with waveforms, and download links for general files/documents). Includes a fullscreen modal media viewer with file downloading.
-- **Message Operations & Soft Deletion:** Allows deleting user messages. Implements a custom confirm deletion modal and handles soft deletion, rendering deleted messages as "This message was deleted" for all users while clean-purging linked assets from storage.
-- **Room History Clearing:** Clean option to clear chat history, displaying a custom backdrop-blurred confirm dialog. Purges all messages from the DB and files from Supabase storage, replacing them with a senderless system audit message.
-- **Interactive User Profile Configuration:** In-app editing for name, contact details, bio, and custom profile image uploads/conversions. Features client-side image cropping/resizing and conversion to Base64 before syncing to the backend. Includes toggle controls for user-level privacy options ("Show Status" and "Read Receipts") that sync instantly with the backend database.
-- **Advanced Chat Search & Match Highlighting:** Search specifically within the current chat room, complete with step-by-step match-highlighting controls (previous/next hit).
-- **Backend API Integration:** Fully integrated with the backend Fastify server for account creation (`/api/auth/register`), authentication (`/api/auth/login`), profile retrieval and update (`/api/auth/me` with support for `show_status` and `read_receipts` sync), database email existence verification (`/api/auth/check/:email`), and session termination (`/api/auth/logout`).
-- **Global Auth Context & Hooks:** Shared React context (`AuthProvider` and custom `useAuth()` hook) to persist state, restore sessions on reload, and dispatch API requests safely with cookies.
-- **Access Route Guards:**
-  - `ProtectedRoute` to guard `/chat` from unauthenticated users.
-  - `PublicRoute` (Guest guard) to prevent logged-in users from manually backtracking to `/login`, `/register`, or `/`, automatically redirecting them to `/chat`.
-- **Immersive Chat Interface:** Fully featured chat interface showing the active user's details, dynamic initials/avatar, online indicators, and realtime chat updates.
-- **Premium Custom Aesthetics:** Custom dark/glassmorphic theme variables, scrollbars, card layouts, hover transitions, error alerts, page spinners, and responsive layouts.
-- **Vector Icons:** Fully integrated vector icons using `lucide-react`.
-- **Shared Media Gallery Utility:** Search and browse photos, videos, and blueprints/files shared across all user conversations. Features date-grouped buckets ("Today", "Yesterday", and Month-Year headings), filters for file types (images, videos, documents), and room-specific filtering. Updates in real-time on messaging events.
+| | |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/1fd14424-672a-40f5-821d-7e1e2192a7fb" width="450" alt="Register Page" /><br>**Register Page:** *Secure registration screen supporting custom avatar uploads, password verification, and instant email validation.* | <img src="https://github.com/user-attachments/assets/ff43f43e-e9b6-49f5-b89a-afbed3d84a42" width="450" alt="Login Page" /><br>**Login Page:** *Authentication gateway verifying user credentials and saving JWT cookies for secure sessions.* |
+| <img src="https://github.com/user-attachments/assets/a8ede980-2a2d-4a17-9c36-1f05439ce536" width="450" alt="Home Page" /><br>**Home Page:** *The primary dashboard layout featuring the core navigation sidebar, conversation sidebar, and welcome screen.* | <img src="https://github.com/user-attachments/assets/c80cdd7f-4715-4834-a3aa-c9823f345126" width="450" alt="Chat Conversations" /><br>**Chat Conversations:** *Immersive chat feed showcasing real-time messages, media attachments, typing status, and read receipts.* |
+| <img src="https://github.com/user-attachments/assets/f6870653-e429-4c55-a3a2-2498d4e4d22b" width="450" alt="Profile Page" /><br>**User Profile:** *Profile customization allowing real-time edits to names, bios, contact details, and cropping/uploading profile pictures.* | <img src="https://github.com/user-attachments/assets/292b51a4-cff0-4bbd-88c2-da3c9b75760b" width="450" alt="Settings Page" /><br>**App Settings:** *Privacy panel with instant toggles for presence status ('Show Status') and read receipts, syncing with the backend database.* |
+| <img src="https://github.com/user-attachments/assets/5654fa4b-e056-49e0-94e3-9750fc80d471" width="450" alt="Media Page" /><br>**Shared Media Gallery:** *Unified gallery categorizing photos, videos, and files shared across all chat rooms, with real-time updates.* | <img src="https://github.com/user-attachments/assets/b80efd14-c75d-4939-b81e-e88b95b94201" width="450" alt="Search and Details" /><br>**Search & Room Details:** *Interactive right details drawer for room members, combined with local message search and hit highlighting.* |
+| <img src="https://github.com/user-attachments/assets/e32a3b00-705a-4f67-9bc8-f00210d8bff4" width="450" alt="Add User Options" /><br>**Add User Options:** *Quick action drop-down menu in the sidebar to start a new DM or create a Group Channel.* | <img src="https://github.com/user-attachments/assets/4f7cf4d7-b5a0-4055-8ee3-4369ca5c0318" width="450" alt="DM Creation Dialog" /><br>**DM Creation:** *Popup modal to start a DM by validating the recipient's email address.* |
+| <img src="https://github.com/user-attachments/assets/71733b18-8087-4058-97fa-354c0dea102a" width="450" alt="Group Creation Dialog" /><br>**Channel (Group) Creation:** *Channel creation menu to configure group chat names and add multiple verified participant emails.* | |
+
+---
+
+## ✨ Core Features
+
+| Feature | Description | Key Tech / Mechanics |
+| :--- | :--- | :--- |
+| **Real-Time Messaging** | Instant message transmission, delivery verification, and real-time state synchronization. | WebSockets, React State |
+| **Presence Indicators** | Live tracking of users' online/offline presence status, including "Last seen" timestamps. | WebSocket Broadcasts |
+| **Activity Indicators** | Shows active typing indicators in real-time when room members are typing. | Debounced event listeners |
+| **Group & Direct Chats** | Create private direct messages or multi-user channels by looking up verified emails. | Fastify API, PostgreSQL relations |
+| **Robust Authentication** | Polished Login & Registration flow with secure route guards and session persistence. | React Router Guards, JWT, Cookies |
+| **Shared Media Gallery** | Unified gallery displaying shared images, videos, and documents grouped by date. | Fastify Media endpoints, filtering |
+| **In-App Profile Management** | Dynamic updates to name, bio, contacts, and custom avatars with client-side cropping. | Base64 conversion, canvas resizing |
+| **Message Search & Highlights** | Text search within the active conversation featuring step-by-step match highlighting. | Custom match highlighting logic |
+| **File & Attachment Pipeline** | Share and preview files up to 50MB with dedicated players and full-screen viewports. | File reader API, custom audio/video layers |
+| **Security & Deletion** | Options to soft-delete specific messages or clear entire conversation chat histories. | Supabase storage API, cascade deletion |
+| **Fully Responsive UI** | Optimized layout that scales dynamically across mobile, tablet, and desktop viewports. | Vanilla CSS media queries |
 
 ---
 
@@ -86,22 +95,6 @@ npm run preview
 
 ---
 
-## 📱 Mobile Responsive Optimizations
-
-The layout has been heavily optimized for small screen dimensions and touch interactions under a dedicated `@media (max-width: 768px)` system:
-- **Utility Nav Bar Collapse:** Collapses to a slim `70px` left bar on small screens, centering navigation icons and branding logo with full hover tooltips.
-- **Compact Conversations List & Dropdown Filters:** Shrinks the middle panel to `80px` displaying centered room avatars. Replaces the horizontal category pills (All, Unread, Groups) with a single three-dots icon button that toggles an absolute-positioned dropdown popup menu, protecting panel space.
-- **Aligned & Flexible Headers:** Standardized height (`65px`) across main headers, updated to grow flexibly (`height: auto !important`) with vertical padding (`0.75rem 1rem !important`) when zoomed in to prevent label cutoff.
-- **Header DM Presence & Avatar Status Dot:** Hides the online/offline text below the room name in direct messages on small viewports to save vertical space. If the partner is online, displays a green status dot directly on the header room avatar.
-- **User Sidebar Active Indicator:** Renders a green online status dot at the bottom right of the user's avatar card in the leftmost sidebar navigator footer.
-- **Tighter Vertical Spacing:** Decreases margins and padding for the messages log and message input typing area, maximizing the scrollable conversation feed area.
-- **Scroll Containment constraints (`min-height: 0`):** Enforces `min-height: 0` on flex panels and grid cells, prompting the browser to activate column scrollbars rather than pushing bottom layouts (like typing forms) off-screen when zoomed.
-- **Details Drawer Overlay:** Renders as a smooth-sliding fixed drawer spanning `280px` to cover a major portion of the screen, ensuring absolute visibility of details and the close (`X`) button without clipping.
-- **Avatar Stretching Protections:** Implemented aspect ratio preservation and `flex-shrink: 0` constraints to secure proper circular representation of initials/profile avatars on limited view heights.
-- **Header Text Protection:** Added bounds and auto-truncation rules for long room/contact names and online status texts in the header.
-
----
-
 ## 📁 Project Structure
 
 ```
@@ -131,3 +124,31 @@ Whispr-FE/
 ├── tsconfig.json           # TypeScript configuration
 └── package.json            # Dependency manifest and scripts
 ```
+
+---
+
+## 🔗 Backend API Integration
+
+The frontend client communicates with the **Whispr Backend API** for all authentication, room management, messaging, and real-time synchronization.
+
+*   **Backend Repository:** [ChiragGitHub231/Whispr-BE](https://github.com/ChiragGitHub231/Whispr-BE)
+*   **Base API Endpoint:** `http://localhost:3001` (proxied via `/api` in development)
+*   **Websocket Server:** `ws://localhost:3001/ws` (proxied via `/ws` in development)
+
+### 🔌 Main API Endpoints Utilized
+
+| Service | Endpoint | Method | Purpose |
+| :--- | :--- | :---: | :--- |
+| **Auth** | `/api/auth/register` | `POST` | Account registration with form validation |
+| | `/api/auth/login` | `POST` | Authenticate user and store JWT cookie |
+| | `/api/auth/logout` | `POST` | Clear JWT session token |
+| | `/api/auth/me` | `GET` / `PUT` | Retrieve or update user profile and privacy settings |
+| | `/api/auth/check/:email` | `GET` | Validate user registration status by email |
+| **Rooms** | `/api/rooms` | `GET` / `POST` | List joined chat rooms or create new DM/Group channels |
+| | `/api/rooms/:id` | `PATCH` / `DELETE` | Rename or delete group channels |
+| | `/api/rooms/:id/members` | `POST` / `DELETE` | Manage group channel participants |
+| **Messages** | `/api/messages/:roomId` | `GET` / `POST` | Load message history (paginated) or send new text/attachments |
+| | `/api/messages/:roomId/upload` | `POST` | Upload file attachments up to 50MB |
+| | `/api/messages/:messageId` | `DELETE` | Soft-delete a sent message |
+| | `/api/messages/room/:roomId/clear` | `DELETE` | Clear complete conversation chat history |
+| **Media** | `/api/media` | `GET` | Retrieve list of all files/media shared in the user's rooms |
